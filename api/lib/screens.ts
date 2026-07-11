@@ -20,11 +20,22 @@ const screenBaseSchema = z.object({
   aspect_ratio: z.string().min(1),
   resolution: z.string().min(1),
   orientation: z.enum(['landscape', 'portrait']),
+  // Not in architecture.md's documented POST /v1/screens request shape —
+  // added in 04e so the k6 simulator's attribute-generator can flag its own
+  // registrations. `is_simulated` has existed on the `screens` table since
+  // 04a for exactly this purpose (dashboard real-vs-virtual distinction,
+  // SIM-INT-01) but nothing ever wrote `true` to it until now. Optional,
+  // defaults false, so every existing caller (dashboard, docs examples) is
+  // unaffected.
+  is_simulated: z.boolean().optional(),
 });
 
-const patchScreenSchema = screenBaseSchema.partial().extend({
-  status: z.enum(['active', 'inactive']).optional(),
-});
+const patchScreenSchema = screenBaseSchema
+  .omit({ is_simulated: true })
+  .partial()
+  .extend({
+    status: z.enum(['active', 'inactive']).optional(),
+  });
 
 router.get('/', async (c) => {
   const auth = c.get('auth');
@@ -70,6 +81,7 @@ router.post('/', async (c) => {
       aspect_ratio: body.aspect_ratio,
       resolution: body.resolution,
       orientation: body.orientation,
+      is_simulated: body.is_simulated ?? false,
     })
     .select()
     .single();
