@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 import invites from './lib/invites';
 import adminTenants from './lib/admin-tenants';
+import adminLedger from './lib/admin-ledger';
 import tenantSelf from './lib/tenant-self';
 import campaigns from './lib/campaigns';
 import screens from './lib/screens';
@@ -30,6 +31,15 @@ app.route('/api/invites', invites);
 
 // Superadmin — tenant lifecycle. Auth applied inside admin-tenants.ts.
 app.route('/api/admin/tenants', adminTenants);
+
+// Superadmin — cross-tenant ledger (04f). Auth applied inside admin-ledger.ts.
+// GET /api/admin/system-health is NOT built — see build-report.md's 04f
+// "recommended follow-up scope": no table anywhere logs a fulfillment
+// *attempt* (only successful reservations get a `fulfillments` row), so
+// request_rate_per_min/error_rate/no_eligible_campaign_rate can't be computed
+// honestly from existing data. docs.ts (openapi.json, /docs) is also unbuilt
+// — no phase in PROJECT_PLAN.md ever assigned it an owner.
+app.route('/api/admin/ledger', adminLedger);
 
 // Tenant — JWT-or-tenant-key (architecture.md § Auth Model, mechanism 2).
 // Auth applied inside each router via tenantAccessMiddleware.
