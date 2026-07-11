@@ -3,7 +3,10 @@ import { handle } from 'hono/vercel';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 import invites from './lib/invites';
-import testRoutes from './lib/test-routes';
+import adminTenants from './lib/admin-tenants';
+import tenantSelf from './lib/tenant-self';
+import campaigns from './lib/campaigns';
+import screens from './lib/screens';
 
 export const config = { runtime: 'edge' };
 
@@ -23,12 +26,18 @@ app.get('/api/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISO
 // Public — must stay outside any route glob a human-auth middleware guards.
 app.route('/api/invites', invites);
 
-// 04b-only auth-primitive proof routes. See api/lib/test-routes.ts header.
-app.route('/api/_test', testRoutes);
+// Superadmin — tenant lifecycle. Auth applied inside admin-tenants.ts.
+app.route('/api/admin/tenants', adminTenants);
 
-// Remaining route modules (campaigns, screens, fulfillments, tenants, admin,
-// docs) are mounted here starting in 04c — see architecture.md § File
-// Structure.
+// Tenant — JWT-or-tenant-key (architecture.md § Auth Model, mechanism 2).
+// Auth applied inside each router via tenantAccessMiddleware.
+app.route('/v1/campaigns', campaigns);
+app.route('/v1/screens', screens);
+app.route('/v1/tenant', tenantSelf);
+
+// Remaining route modules (fulfillments + reconciliation engine, admin
+// system-health/ledger, docs) are mounted in later phases — see
+// architecture.md § File Structure and PROJECT_PLAN.md's 04d+ sessions.
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) {
