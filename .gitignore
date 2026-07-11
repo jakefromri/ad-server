@@ -32,6 +32,11 @@ SESSION_HANDOFF.md
 test-results/
 playwright-report/
 
+# Simulator run output — live tenant API keys, tenant_admin passwords, and
+# generated device keys (simulator/seed.ts, simulator/attribute-generator.ts).
+# Never commit; regenerable/reusable locally across sessions.
+simulator/.output/
+
 # IDE / OS
 .vscode/
 .idea/
