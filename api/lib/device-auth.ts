@@ -5,7 +5,7 @@
 import { createMiddleware } from 'hono/factory';
 import { HTTPException } from 'hono/http-exception';
 import { ErrorCode } from '../../types';
-import { supabaseAdmin } from './supabase';
+import { supabaseAdmin, supabaseAuth } from './supabase';
 import { hashApiKey } from './hash';
 
 export interface DeviceContext {
@@ -37,6 +37,25 @@ export const deviceAuthMiddleware = createMiddleware(async (c, next) => {
     .single();
 
   if (!deviceKey || deviceKey.status !== 'active') {
+    // Recognize a valid-but-wrong-scope credential before giving up — the
+    // "vice versa" half of architecture.md § Auth Model, mechanism 3 ("403 if
+    // a device tries a management endpoint, and vice versa"). Mirrors
+    // tenantAccessMiddleware's fix in 04c, which only covered the reverse
+    // direction (no device-only route existed yet to exercise this side).
+    const { data: tenantKey } = await supabaseAdmin.from('tenant_api_keys').select('status').eq('key_hash', keyHash).single();
+    if (tenantKey && tenantKey.status === 'active') {
+      throw new HTTPException(403, {
+        message: JSON.stringify({ error: 'Tenant API keys cannot access device endpoints', code: ErrorCode.FORBIDDEN }),
+      });
+    }
+
+    const { data: jwtData, error: jwtError } = await supabaseAuth.auth.getUser(presentedKey);
+    if (!jwtError && jwtData.user) {
+      throw new HTTPException(403, {
+        message: JSON.stringify({ error: 'Human credentials cannot access device endpoints', code: ErrorCode.FORBIDDEN }),
+      });
+    }
+
     throw new HTTPException(401, {
       message: JSON.stringify({ error: 'Invalid or revoked device key', code: ErrorCode.UNAUTHORIZED }),
     });

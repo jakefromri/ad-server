@@ -1,0 +1,279 @@
+// POST /v1/fulfillments, POST /v1/fulfillments/:id/report. Mounted at
+// /v1/fulfillments behind deviceAuthMiddleware only (architecture.md § API
+// Endpoints, "Device — Fulfillment": 403 if a tenant_admin JWT or tenant API
+// key is presented instead — deviceAuthMiddleware now distinguishes that
+// from a plain 401, per this phase's fix to device-auth.ts).
+//
+// This is the reconciliation engine's request/response boundary. All of the
+// scoring math lives in reconciliation.ts (pure, testable); this file is
+// I/O — loading fresh data each attempt and calling the reserve_fulfillment
+// RPC for the one step that needs a real row lock (see the migration's
+// header comment for why that step can't be plain sequential supabase-js
+// calls).
+
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { ErrorCode } from '../../types';
+import { supabaseAdmin } from './supabase';
+import { deviceAuthMiddleware } from './device-auth';
+import { filterEligibleCampaigns, scoreEligiblePool, type CampaignForEligibility } from './reconciliation';
+import type { TargetingScreen } from './targeting';
+
+const router = new Hono();
+router.use('*', deviceAuthMiddleware);
+
+const MAX_ATTEMPTS = 3;
+
+interface EligiblePoolLoad {
+  eligible: ReturnType<typeof filterEligibleCampaigns>;
+  mediaByCampaign: Map<string, string>;
+}
+
+/** Loads the tenant's currently-active, in-flight campaigns fresh, joined
+ * against campaign_pacing (which already implements the lazy-expiry rule —
+ * a 'reserved' row past its timeout is excluded from pending_reserved_count
+ * regardless of whether the cron sweep has formally marked it 'expired'
+ * yet), then runs the targeting/remaining-obligation filter. Called fresh on
+ * every attempt — never reuses a prior attempt's data (architecture.md's
+ * race-safety requirement). */
+async function loadEligiblePool(tenantId: string, screen: TargetingScreen, now: Date): Promise<EligiblePoolLoad> {
+  const nowIso = now.toISOString();
+
+  const { data: campaigns } = await supabaseAdmin
+    .from('campaigns')
+    .select('id, obligation_type, obligation_target, priority_weight, flight_start, flight_end, status, targeting, creative_media_path')
+    .eq('tenant_id', tenantId)
+    .eq('status', 'active')
+    .lte('flight_start', nowIso)
+    .gte('flight_end', nowIso);
+
+  if (!campaigns || campaigns.length === 0) {
+    return { eligible: [], mediaByCampaign: new Map() };
+  }
+
+  const ids = campaigns.map((c) => c.id);
+  const { data: pacingRows } = await supabaseAdmin
+    .from('campaign_pacing')
+    .select('campaign_id, confirmed_count, pending_reserved_count')
+    .in('campaign_id', ids);
+
+  const pacingByCampaign = new Map((pacingRows ?? []).map((r) => [r.campaign_id, r]));
+  const mediaByCampaign = new Map(campaigns.map((c) => [c.id, c.creative_media_path]));
+
+  const withPacing: CampaignForEligibility[] = campaigns.map((c) => {
+    const pacing = pacingByCampaign.get(c.id);
+    return {
+      id: c.id,
+      obligation_type: c.obligation_type,
+      obligation_target: c.obligation_target,
+      priority_weight: c.priority_weight,
+      flight_start: c.flight_start,
+      flight_end: c.flight_end,
+      status: c.status,
+      targeting: c.targeting,
+      confirmed_count: pacing?.confirmed_count ?? 0,
+      pending_reserved_count: pacing?.pending_reserved_count ?? 0,
+    };
+  });
+
+  return { eligible: filterEligibleCampaigns(withPacing, screen, now), mediaByCampaign };
+}
+
+interface ReserveRpcRow {
+  out_result_status: 'reserved' | 'quota_exceeded' | 'campaign_no_longer_eligible';
+  out_fulfillment_id: string | null;
+  out_requested_at: string | null;
+  out_reserved_expires_at: string | null;
+}
+
+async function attemptReservation(params: {
+  tenantId: string;
+  campaignId: string;
+  screenId: string;
+  mediaRef: string;
+  reservationTimeoutSeconds: number;
+  obligationType: 'impression_count' | 'share_of_voice';
+  obligationTarget: number;
+}): Promise<ReserveRpcRow> {
+  const { data, error } = await supabaseAdmin.rpc('reserve_fulfillment', {
+    p_tenant_id: params.tenantId,
+    p_campaign_id: params.campaignId,
+    p_screen_id: params.screenId,
+    p_media_ref: params.mediaRef,
+    p_reservation_timeout_seconds: params.reservationTimeoutSeconds,
+    p_obligation_type: params.obligationType,
+    p_obligation_target: params.obligationTarget,
+  });
+  if (error) throw error;
+  const row = (data as ReserveRpcRow[] | null)?.[0];
+  if (!row) throw new Error('reserve_fulfillment returned no row');
+  return row;
+}
+
+router.post('/', async (c) => {
+  const device = c.get('device');
+
+  const { data: tenant } = await supabaseAdmin
+    .from('tenants')
+    .select('fulfillment_quota, reservation_timeout_seconds')
+    .eq('id', device.tenant_id)
+    .single();
+
+  if (!tenant) return c.json({ error: 'Tenant not found', code: ErrorCode.NOT_FOUND }, 404);
+
+  // Step 2 — fast unlocked quota pre-check (QUOTA-UNIT-01: must short-circuit
+  // before the campaign query even runs, for the common already-over-quota
+  // case). Not authoritative — reserve_fulfillment re-checks under lock.
+  const { data: usage } = await supabaseAdmin
+    .from('fulfillment_quota_usage')
+    .select('used_count')
+    .eq('tenant_id', device.tenant_id)
+    .maybeSingle();
+
+  if ((usage?.used_count ?? 0) >= Number(tenant.fulfillment_quota)) {
+    return c.json({ error: 'Fulfillment quota exceeded', code: ErrorCode.QUOTA_EXCEEDED }, 429);
+  }
+
+  const { data: screen } = await supabaseAdmin
+    .from('screens')
+    .select('state, zip, aspect_ratio, resolution, orientation')
+    .eq('id', device.screen_id)
+    .single();
+
+  if (!screen) return c.json({ error: 'Screen not found', code: ErrorCode.NOT_FOUND }, 404);
+
+  const now = new Date();
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const { eligible, mediaByCampaign } = await loadEligiblePool(device.tenant_id, screen, now);
+    if (eligible.length === 0) {
+      return c.json({ fulfilled: false, reason: 'no_eligible_campaigns' });
+    }
+
+    const { winner, tier, candidates } = scoreEligiblePool(eligible, now);
+    if (!winner) {
+      return c.json({ fulfilled: false, reason: 'no_eligible_campaigns' });
+    }
+
+    if (candidates.length > 1) {
+      // Near-tie winner-selection detail — scope.md's "log enough detail to
+      // reconstruct after the fact why a given campaign won" flag. No
+      // dedicated ledger table for this in architecture.md's Data Model;
+      // Vercel's function logs are the pragmatic MVP store.
+      console.log('reconciliation_near_tie', {
+        tenant_id: device.tenant_id,
+        screen_id: device.screen_id,
+        attempt,
+        tier,
+        winner_id: winner.id,
+        candidates: candidates.map((cand) => ({ campaign_id: cand.campaign.id, pacing_pressure: cand.pacingPressure })),
+      });
+    }
+
+    const mediaRef = mediaByCampaign.get(winner.id);
+    if (!mediaRef) continue; // campaign vanished between load and here — retry fresh
+
+    const result = await attemptReservation({
+      tenantId: device.tenant_id,
+      campaignId: winner.id,
+      screenId: device.screen_id,
+      mediaRef,
+      reservationTimeoutSeconds: tenant.reservation_timeout_seconds,
+      obligationType: winner.obligation_type,
+      obligationTarget: winner.obligation_target,
+    });
+
+    if (result.out_result_status === 'quota_exceeded') {
+      // Authoritative check failed — being over quota isn't fixed by trying a
+      // different campaign, so no retry (architecture.md).
+      return c.json({ error: 'Fulfillment quota exceeded', code: ErrorCode.QUOTA_EXCEEDED }, 429);
+    }
+
+    if (result.out_result_status === 'reserved') {
+      return c.json(
+        {
+          fulfillment_id: result.out_fulfillment_id,
+          campaign_id: winner.id,
+          media_ref: mediaRef,
+          reserved_expires_at: result.out_reserved_expires_at,
+        },
+        201
+      );
+    }
+
+    // 'campaign_no_longer_eligible' — a concurrent request claimed the last
+    // unit of this campaign's obligation since scoring ran. Loop continues:
+    // next attempt re-queries and re-scores fresh, never reuses this
+    // attempt's eligible set or winner (RACE-INT-02).
+  }
+
+  // All MAX_ATTEMPTS attempts lost the campaign-row race (RACE-INT-03).
+  return c.json({ fulfilled: false, reason: 'no_eligible_campaigns' });
+});
+
+const reportSchema = z.object({
+  outcome: z.enum(['played', 'skipped', 'failed']),
+  played_duration_ms: z.number().int().nonnegative().optional(),
+});
+
+router.post('/:id/report', async (c) => {
+  const device = c.get('device');
+  const id = c.req.param('id');
+
+  const parsed = reportSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request', code: ErrorCode.VALIDATION_ERROR }, 400);
+  }
+  const { outcome, played_duration_ms } = parsed.data;
+
+  const { data: fulfillment, error: fetchError } = await supabaseAdmin
+    .from('fulfillments')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (fetchError || !fulfillment) {
+    return c.json({ error: 'Fulfillment not found', code: ErrorCode.NOT_FOUND }, 404);
+  }
+
+  if (fulfillment.screen_id !== device.screen_id) {
+    return c.json({ error: 'Fulfillment belongs to a different screen', code: ErrorCode.FORBIDDEN }, 403);
+  }
+
+  if (fulfillment.status === 'confirmed' || fulfillment.status === 'failed') {
+    return c.json({ error: 'Fulfillment already reported', code: ErrorCode.ALREADY_REPORTED }, 409);
+  }
+
+  // Lazy-expiry rule applies here too: a 'reserved' row past its timeout is
+  // treated as expired even if the cron sweep hasn't formally flipped its
+  // status yet (architecture.md § Expiry mechanics).
+  if (fulfillment.status === 'expired' || new Date(fulfillment.reserved_expires_at) < new Date()) {
+    return c.json({ error: 'Reservation already expired', code: ErrorCode.LATE_REPORT }, 409);
+  }
+
+  const newStatus = outcome === 'played' ? 'confirmed' : 'failed';
+
+  // Guard the transition on status='reserved' so two simultaneous report
+  // calls for the same fulfillment can't both succeed — the update is a
+  // single atomic statement, no RPC needed for this narrower race.
+  const { data: updated, error: updateError } = await supabaseAdmin
+    .from('fulfillments')
+    .update({
+      status: newStatus,
+      reported_at: new Date().toISOString(),
+      report_outcome: outcome,
+      played_duration_ms: played_duration_ms ?? null,
+    })
+    .eq('id', id)
+    .eq('status', 'reserved')
+    .select()
+    .single();
+
+  if (updateError || !updated) {
+    return c.json({ error: 'Fulfillment already reported', code: ErrorCode.ALREADY_REPORTED }, 409);
+  }
+
+  return c.json({ status: outcome === 'played' ? 'confirmed' : 'released' });
+});
+
+export default router;

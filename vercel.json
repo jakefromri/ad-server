@@ -3,5 +3,8 @@
     { "source": "/v1/:path*", "destination": "/api" },
     { "source": "/docs", "destination": "/api" },
     { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/cron/expire-reservations", "schedule": "* * * * *" }
   ]
 }
