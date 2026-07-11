@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Environment — never commit real values
+.env
+.env.local
+.env.*.local
+
+# Supabase local state — contains project refs and connection strings
+supabase/.temp/
+.supabase/
+
+# Vercel local config
+.vercel/
+
+# Internal working docs — Ralph Loop inputs, not public documentation
+idea.md
+scope.md
+architecture.md
+adversarial-report.md
+test-plan.md
+build-report.md
+load-test-report.md
+HANDOVER.md
+
+# Test artifacts
+test-results/
+playwright-report/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
