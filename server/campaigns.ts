@@ -30,7 +30,7 @@ const targetingSchema = z.object({
     .optional(),
 });
 
-const createCampaignSchema = z.object({
+export const createCampaignSchema = z.object({
   name: z.string().min(1),
   creative_media_path: z.string().min(1),
   obligation_type: z.enum(['impression_count', 'share_of_voice']),
@@ -42,7 +42,7 @@ const createCampaignSchema = z.object({
   status: z.enum(['draft', 'active', 'paused', 'archived']).optional(),
 });
 
-const patchCampaignSchema = createCampaignSchema.partial();
+export const patchCampaignSchema = createCampaignSchema.partial();
 
 interface ObligationFlightCheck {
   obligation_type: 'impression_count' | 'share_of_voice';

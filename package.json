@@ -7,6 +7,8 @@
     "dev": "vite",
     "dev:api": "vercel dev",
     "dev:api:local": "tsx api/local-server.ts",
+    "generate:openapi": "tsx scripts/generate-openapi.ts",
+    "prebuild": "npm run generate:openapi",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
@@ -50,8 +52,9 @@
     "tailwindcss-animate": "^1.0.7",
     "tsx": "^4.23.0",
     "typescript": "^5.3.3",
-    "vercel": "^34.2.5",
+    "vercel": "^55.0.0",
     "vite": "^5.1.4",
-    "vitest": "^1.3.1"
+    "vitest": "^1.3.1",
+    "zod-to-json-schema": "^3.25.2"
   }
 }

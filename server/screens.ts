@@ -13,7 +13,7 @@ import { tenantAccessMiddleware } from './tenant-access';
 const router = new Hono();
 router.use('*', tenantAccessMiddleware);
 
-const screenBaseSchema = z.object({
+export const screenBaseSchema = z.object({
   label: z.string().min(1),
   state: z.string().length(2).optional().nullable(),
   zip: z.string().min(1).optional().nullable(),
@@ -30,7 +30,7 @@ const screenBaseSchema = z.object({
   is_simulated: z.boolean().optional(),
 });
 
-const patchScreenSchema = screenBaseSchema
+export const patchScreenSchema = screenBaseSchema
   .omit({ is_simulated: true })
   .partial()
   .extend({
