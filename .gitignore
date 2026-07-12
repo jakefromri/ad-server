@@ -19,17 +19,25 @@ supabase/.temp/
 
 # Internal working docs — Ralph Loop inputs, not public documentation
 idea.md
+PROJECT_PLAN.md
 scope.md
 architecture.md
 adversarial-report.md
 test-plan.md
 build-report.md
 load-test-report.md
+qa-report.md
 HANDOVER.md
+SESSION_HANDOFF.md
 
 # Test artifacts
 test-results/
 playwright-report/
+
+# Simulator run output — live tenant API keys, tenant_admin passwords, and
+# generated device keys (simulator/seed.ts, simulator/attribute-generator.ts).
+# Never commit; regenerable/reusable locally across sessions.
+simulator/.output/
 
 # IDE / OS
 .vscode/
@@ -43,3 +51,4 @@ Thumbs.db
 # Logs
 logs/
 *.log
+.vercel
