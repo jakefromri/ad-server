@@ -122,6 +122,11 @@
         ],
         "summary": "List all tenants",
         "description": "**Auth:** superadmin",
+        "security": [
+          {
+            "superadminAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -141,6 +146,11 @@
         ],
         "summary": "Create a tenant (atomically creates first tenant_admin invite)",
         "description": "**Auth:** superadmin",
+        "security": [
+          {
+            "superadminAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -207,6 +217,11 @@
             }
           }
         ],
+        "security": [
+          {
+            "superadminAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -265,6 +280,11 @@
             }
           }
         ],
+        "security": [
+          {
+            "superadminAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -298,6 +318,11 @@
             }
           }
         ],
+        "security": [
+          {
+            "superadminAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -322,6 +347,11 @@
         ],
         "summary": "Cross-tenant fulfillment ledger (paginated)",
         "description": "**Auth:** superadmin",
+        "security": [
+          {
+            "superadminAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -344,6 +374,11 @@
         ],
         "summary": "Windowed system health metrics",
         "description": "**Auth:** superadmin",
+        "security": [
+          {
+            "superadminAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -368,6 +403,11 @@
         ],
         "summary": "List campaigns",
         "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "security": [
+          {
+            "tenantAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -387,6 +427,11 @@
         ],
         "summary": "Create a campaign",
         "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "security": [
+          {
+            "tenantAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -568,6 +613,11 @@
             }
           }
         ],
+        "security": [
+          {
+            "tenantAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -741,6 +791,11 @@
             }
           }
         ],
+        "security": [
+          {
+            "tenantAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -766,6 +821,11 @@
         ],
         "summary": "List screens",
         "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "security": [
+          {
+            "tenantAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -785,6 +845,11 @@
         ],
         "summary": "Register a screen",
         "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "security": [
+          {
+            "tenantAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -869,6 +934,11 @@
             }
           }
         ],
+        "security": [
+          {
+            "tenantAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -950,6 +1020,11 @@
             }
           }
         ],
+        "security": [
+          {
+            "tenantAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -971,6 +1046,11 @@
         ],
         "summary": "View tenant API key status",
         "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "security": [
+          {
+            "tenantAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -993,6 +1073,11 @@
         ],
         "summary": "Rotate tenant API key",
         "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "security": [
+          {
+            "tenantAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -1014,6 +1099,11 @@
         ],
         "summary": "Tenant-wide fulfillment quota usage",
         "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "security": [
+          {
+            "tenantAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -1036,6 +1126,11 @@
         ],
         "summary": "Windowed fulfillment usage broken down per screen",
         "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "security": [
+          {
+            "tenantAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -1058,6 +1153,11 @@
         ],
         "summary": "Request a fulfillment (reserve an eligible campaign)",
         "description": "**Auth:** device API key",
+        "security": [
+          {
+            "deviceAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -1090,6 +1190,11 @@
             "schema": {
               "type": "string"
             }
+          }
+        ],
+        "security": [
+          {
+            "deviceAuth": []
           }
         ],
         "requestBody": {
@@ -1140,7 +1245,12 @@
           "Cron"
         ],
         "summary": "Vercel Cron backstop for reservation expiry",
-        "description": "**Auth:** CRON_SECRET header",
+        "description": "**Auth:** CRON_SECRET header (only enforced when set)",
+        "security": [
+          {
+            "cronAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -1181,6 +1291,30 @@
             "description": "Success"
           }
         }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "superadminAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Supabase Auth JWT for a superadmin user"
+      },
+      "tenantAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "tenant_admin JWT or tenant API key — server/tenant-access.ts accepts either"
+      },
+      "deviceAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Device API key issued at screen registration (POST /v1/screens)"
+      },
+      "cronAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "CRON_SECRET — only enforced when that env var is set"
       }
     }
   }
