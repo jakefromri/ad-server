@@ -185,6 +185,10 @@ load-testing tool) — split into sub-sessions rather than one pass, same lesson
   to close any remaining gap to 100k req/min — not necessarily hitting 100k inside this build
 - Done: a written result (`load-test-report.md`) stating req/min achieved, where it broke, and
   what would need to change to go further
+- **Note (added after the fact, in the 04f follow-up scoping session — see 04i below):** this
+  phase ran in parallel with that scoping session, so its `load-test-report.md` numbers predate
+  and don't include 04i's `fulfillment_attempts` async write (added to the fulfillment hot path
+  for `GET /api/admin/system-health`). Accepted gap, not a blocker — see 04i's sequencing note.
 
 **04h — tests + HANDOVER.md**
 - Unit + integration test suite (per CLAUDE.md — never skip this; Meridian's lesson was that
@@ -197,6 +201,52 @@ load-testing tool) — split into sub-sessions rather than one pass, same lesson
   `adversarial-report.md` / `test-plan.md` / `load-test-report.md` are also gitignored before the
   first commit (Lineup lesson — these are Ralph Loop working docs, not public documentation, and
   this repo is likely public)
+- **Note (added after the fact, in the 04f follow-up scoping session):** if this phase also runs
+  before 04i lands, its test suite won't yet cover 04i's new endpoints/fields — fine, since 04i has
+  its own test-plan coverage and its own pass through this phase's "done" criteria isn't required
+  again, but a re-run of `npm run typecheck`/`npm run lint` after 04i is still worth doing before
+  the eventual first commit's gitignore check above.
+
+**04i — admin follow-up scope** *(added in a dedicated follow-up scoping session that ran after 04f
+and in parallel with 04g/04h — see `build-report.md`'s 04f "Recommended follow-up scope" for the
+original gap list, and the Data Model / API Endpoints sections of `architecture.md` for the
+resolved designs referenced below. Numbered last, after 04g/04h, since those two phases were
+already in flight by the time this scope was worked through — not because this work is lower
+priority than either)*
+- `GET /api/admin/system-health` — add the `fulfillment_attempts` table (Data Model) and switch
+  `api/index.ts`'s Vercel export from `handle(app)` to a custom handler that forwards
+  `ExecutionContext`, so `POST /v1/fulfillments` can log one row per call via `c.executionCtx.waitUntil(...)`
+  without adding hot-path latency
+- `POST /api/admin/tenants/:id/reinvite` and `GET /api/admin/tenants/:id` (combined
+  tenant+campaigns+screens detail) — both pure additions, no existing behavior changes
+- `GET /v1/tenant/usage/by-screen` — new windowed aggregation endpoint over the existing
+  `fulfillments` table; add the composite index architecture.md specifies
+  (`fulfillments_tenant_screen_requested_idx`)
+- `GET /v1/campaigns/:id/pacing`'s new `no_eligible_screens` field — live structural check inside
+  the existing handler, no schema change
+- `docs.ts` — convert every route in `api/lib/*.ts` from plain-Zod validation to
+  `@hono/zod-openapi`'s `createRoute`/`OpenAPIHono` pattern; mount `GET /v1/openapi.json` and
+  `GET /docs`. This is the largest single sub-item in this phase (touches every route file) —
+  consider running it last within this phase, or as its own sub-session, since it's mechanical
+  and doesn't depend on the other four
+- Frontend: wire `/admin/health`, `/admin/tenants/:id`'s real sub-views (replacing the list-cache
+  workaround noted in 04f's deviations), the reinvite action, the per-screen usage table on
+  `/t/usage`, the `no_eligible_screens` badge on `/t/campaigns`, and un-stub the `/docs` link on
+  `/t/settings`
+- **Sequencing note (revised — 04g already ran before this scope existed):** the original intent
+  was for `fulfillment_attempts` to land *before* load testing, so `load-test-report.md` would be
+  a trustworthy final number including its write overhead. That's no longer possible — 04g already
+  ran in parallel with this scoping session, without this table. Accepted as-is: `fulfillment_attempts`
+  is async (`waitUntil`, off the response's critical path) and, per the Scale Plan table, is at
+  worst a second write stream roughly `fulfillments`-sized at true 100k req/min — a candidate
+  bottleneck, not a certain one. If it matters, a targeted follow-up load-test run (not a full
+  04g re-run) is the way to check, not a hard gate on shipping this phase.
+- Done: all six items from `build-report.md`'s 04f follow-up list are either built per the
+  designs in `architecture.md`, or (none currently) explicitly cut with reasoning recorded here.
+  Covers `test-plan.md`'s new cases (`ADMIN-INT-06` through `09`, `PACING-INT-01` through `04`,
+  `USAGE-INT-01` through `03`, `OPENAPI-UNIT-01`, `FULFILL-ATTEMPT-INT-01`, `DOCS-INT-01`), which
+  should also be folded into 04h's test suite if 04h hasn't run yet, or added to it afterward if it
+  has
 
 ---
 
@@ -318,5 +368,7 @@ skunkworks/ad-server/
 ## linear
 
 Create a parent issue in the **Foxricciardi** team: **"New project: ad-server"**
-Child issues per agent (01–07), with Agent 04 broken into 04a–04h sub-issues per the phases above.
+Child issues per agent (01–07), with Agent 04 broken into 04a–04i sub-issues per the phases above.
+Not set up yet for ad-server — deferred until past MVP stability, same pattern as other skunkworks
+projects.
 Status lifecycle: Backlog → In Progress → In Review → Done.

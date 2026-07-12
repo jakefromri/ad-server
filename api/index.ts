@@ -2,14 +2,14 @@ import { Hono } from 'hono';
 import { handle } from 'hono/vercel';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
-import invites from './lib/invites';
-import adminTenants from './lib/admin-tenants';
-import adminLedger from './lib/admin-ledger';
-import tenantSelf from './lib/tenant-self';
-import campaigns from './lib/campaigns';
-import screens from './lib/screens';
-import fulfillments from './lib/fulfillments';
-import cron from './lib/cron';
+import invites from '../server/invites';
+import adminTenants from '../server/admin-tenants';
+import adminLedger from '../server/admin-ledger';
+import tenantSelf from '../server/tenant-self';
+import campaigns from '../server/campaigns';
+import screens from '../server/screens';
+import fulfillments from '../server/fulfillments';
+import cron from '../server/cron';
 
 export const config = { runtime: 'edge' };
 

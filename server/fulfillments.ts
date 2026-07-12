@@ -13,7 +13,7 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { ErrorCode } from '../../types';
+import { ErrorCode, type CampaignTargeting } from '../types';
 import { supabaseAdmin } from './supabase';
 import { deviceAuthMiddleware } from './device-auth';
 import { filterEligibleCampaigns, scoreEligiblePool, type CampaignForEligibility } from './reconciliation';
@@ -29,15 +29,37 @@ interface EligiblePoolLoad {
   mediaByCampaign: Map<string, string>;
 }
 
-/** Loads the tenant's currently-active, in-flight campaigns fresh, joined
- * against campaign_pacing (which already implements the lazy-expiry rule —
- * a 'reserved' row past its timeout is excluded from pending_reserved_count
- * regardless of whether the cron sweep has formally marked it 'expired'
- * yet), then runs the targeting/remaining-obligation filter. Called fresh on
- * every attempt — never reuses a prior attempt's data (architecture.md's
- * race-safety requirement). */
-async function loadEligiblePool(tenantId: string, screen: TargetingScreen, now: Date): Promise<EligiblePoolLoad> {
-  const nowIso = now.toISOString();
+interface ActiveCampaignRow {
+  id: string;
+  obligation_type: 'impression_count' | 'share_of_voice';
+  obligation_target: number;
+  priority_weight: number;
+  flight_start: string;
+  flight_end: string;
+  status: string;
+  targeting: CampaignTargeting;
+  creative_media_path: string;
+}
+
+// architecture.md § Scale Plan, row 1: "Cache each tenant's active campaign
+// set (definition + targeting, not pacing state)... invalidated on campaign
+// CRUD or a short TTL (e.g. 5s)". 04g's load test found this query
+// dominating per-request latency under concurrency (six sequential DB round
+// trips per fulfillment attempt, of which this was one) — this is the one
+// targeted fix, not a general-purpose cache layer. Deliberately in-memory
+// module scope, not Redis: Edge instances are ephemeral/per-region, so this
+// doesn't guarantee global consistency, but a 5s-stale campaign definition
+// (not pacing, which is always queried fresh below) is the tradeoff the doc
+// already accepts. Never caches campaign_pacing — that must stay live every
+// attempt (race-safety requirement, same doc).
+const ACTIVE_CAMPAIGN_CACHE_TTL_MS = 5000;
+const activeCampaignCache = new Map<string, { rows: ActiveCampaignRow[]; expiresAt: number }>();
+
+async function loadActiveCampaigns(tenantId: string, nowIso: string): Promise<ActiveCampaignRow[]> {
+  const cached = activeCampaignCache.get(tenantId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.rows;
+  }
 
   const { data: campaigns } = await supabaseAdmin
     .from('campaigns')
@@ -46,6 +68,24 @@ async function loadEligiblePool(tenantId: string, screen: TargetingScreen, now: 
     .eq('status', 'active')
     .lte('flight_start', nowIso)
     .gte('flight_end', nowIso);
+
+  const rows = campaigns ?? [];
+  activeCampaignCache.set(tenantId, { rows, expiresAt: Date.now() + ACTIVE_CAMPAIGN_CACHE_TTL_MS });
+  return rows;
+}
+
+/** Loads the tenant's currently-active, in-flight campaigns (cached — see
+ * loadActiveCampaigns), joined against campaign_pacing (queried fresh every
+ * time — it already implements the lazy-expiry rule: a 'reserved' row past
+ * its timeout is excluded from pending_reserved_count regardless of whether
+ * the cron sweep has formally marked it 'expired' yet), then runs the
+ * targeting/remaining-obligation filter. Pacing is never reused from a
+ * prior attempt (architecture.md's race-safety requirement) — only the
+ * campaign definition/targeting half of this is cached. */
+async function loadEligiblePool(tenantId: string, screen: TargetingScreen, now: Date): Promise<EligiblePoolLoad> {
+  const nowIso = now.toISOString();
+
+  const campaigns = await loadActiveCampaigns(tenantId, nowIso);
 
   if (!campaigns || campaigns.length === 0) {
     return { eligible: [], mediaByCampaign: new Map() };

@@ -4,8 +4,8 @@
 
 import { createMiddleware } from 'hono/factory';
 import { HTTPException } from 'hono/http-exception';
-import type { JwtClaims } from '../../types';
-import { ErrorCode } from '../../types';
+import type { JwtClaims } from '../types';
+import { ErrorCode } from '../types';
 import { supabaseAuth, supabaseAdmin } from './supabase';
 
 export interface AuthContext {

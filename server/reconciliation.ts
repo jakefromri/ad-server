@@ -14,7 +14,7 @@
 // for loading fresh campaign/pacing data before each attempt and for the
 // row-lock re-validation that follows winner selection.
 
-import type { CampaignTargeting } from '../../types';
+import type { CampaignTargeting } from '../types';
 import { matchesTargeting, type TargetingScreen } from './targeting';
 
 export const TIEBREAK_EPSILON = 0.01;

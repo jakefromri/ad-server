@@ -10,7 +10,7 @@
 // are OR'd — a screen is in-daypart if the current time falls within *any*
 // listed window (scope.md § explicit behaviors).
 
-import type { CampaignTargeting, Screen } from '../../types';
+import type { CampaignTargeting, Screen } from '../types';
 
 export type TargetingScreen = Pick<Screen, 'state' | 'zip' | 'aspect_ratio' | 'resolution' | 'orientation'>;
 

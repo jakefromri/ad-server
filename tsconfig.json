@@ -18,6 +18,6 @@
       "@shared/*": ["./types/*"]
     }
   },
-  "include": ["src", "types", "api", "simulator"],
+  "include": ["src", "types", "api", "server", "simulator"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
