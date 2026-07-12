@@ -282,7 +282,7 @@ router.post('/', async (c) => {
   }
 });
 
-const reportSchema = z.object({
+export const reportSchema = z.object({
   outcome: z.enum(['played', 'skipped', 'failed']),
   played_duration_ms: z.number().int().nonnegative().optional(),
 });

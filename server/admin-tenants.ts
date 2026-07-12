@@ -43,7 +43,7 @@ router.get('/', async (c) => {
   return c.json({ tenants: result });
 });
 
-const createTenantSchema = z.object({
+export const createTenantSchema = z.object({
   name: z.string().min(1),
   fulfillment_quota: z.number().int().nonnegative(),
   admin_email: z.string().email(),
@@ -138,7 +138,7 @@ router.post('/', async (c) => {
   );
 });
 
-const patchTenantSchema = z
+export const patchTenantSchema = z
   .object({
     status: z.enum(['active', 'deactivated']).optional(),
     fulfillment_quota: z.number().int().nonnegative().optional(),

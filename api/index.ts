@@ -10,6 +10,7 @@ import campaigns from '../server/campaigns';
 import screens from '../server/screens';
 import fulfillments from '../server/fulfillments';
 import cron from '../server/cron';
+import docs from '../server/docs';
 
 export const config = { runtime: 'edge' };
 
@@ -55,20 +56,16 @@ app.route('/v1/fulfillments', fulfillments);
 // CRON_SECRET gate.
 app.route('/api/cron', cron);
 
-// docs.ts / GET /v1/openapi.json / GET /docs — attempted in 04i via
-// @hono/zod-openapi, reverted in the same phase: that package internally
-// imports hono's `mergePath` via the cross-package subpath `hono/utils/url`,
-// which Vercel's Edge Function deploy-time validator rejects outright
-// ("referencing unsupported modules"), confirmed with a real
-// `vercel deploy --prebuilt`. Every version of @hono/zod-openapi has this
-// same import (core to how `.route()` merges sub-router registries), so it
-// isn't fixable by bumping versions, and switching this function to Node.js
-// runtime to sidestep the Edge-only restriction surfaced a second blocking
-// issue (this repo's `"type": "module"` + Vercel's unbundled Node Function
-// packaging needs explicit `.js` extensions on every relative import — a
-// much bigger, riskier change). Not attempted again without a clearer path
-// around one of those two problems — see build-report.md's 04i section for
-// the full investigation.
+// GET /v1/openapi.json, GET /docs (04j) — a build-time-generated static
+// spec + a CDN-loaded Swagger UI page, not @hono/zod-openapi/OpenAPIHono.
+// See server/docs.ts's header comment and PROJECT_PLAN.md's 04j section for
+// why: 04i's attempt at this via @hono/zod-openapi broke Vercel's Edge
+// Function deploy-time validator (that package internally imports hono's
+// `mergePath` via the cross-package subpath `hono/utils/url`, rejected
+// outright, confirmed across every published version) and was reverted —
+// see build-report.md's 04i section for the full investigation.
+app.route('/', docs);
+
 app.onError((err, c) => {
   if (err instanceof HTTPException) {
     // Every auth middleware (human-auth/device-auth/tenant-access) throws

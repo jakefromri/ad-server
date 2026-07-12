@@ -1,8 +1,8 @@
 // ADMIN-INT-03, ADMIN-INT-06..09, USAGE-INT-01..03, FULFILL-ATTEMPT-INT-01
-// — 04i, follow-up scoping session. test-plan.md § Integration Tests.
-// (docs.ts/OpenAPI — OPENAPI-UNIT-01, both DOCS-INT-01 entries — was
-// attempted and reverted in this same phase; see build-report.md's 04i
-// section and api/index.ts's header comment for why.)
+// — 04i, follow-up scoping session. Both DOCS-INT-01 entries — 04j,
+// re-scope of 04i's reverted docs.ts (OPENAPI-UNIT-01 lives in
+// test/unit/openapi.test.ts instead, since it's a unit-level check over
+// app.routes, not a live request). test-plan.md § Integration Tests.
 
 import { describe, it, expect, afterAll } from 'vitest';
 import {
@@ -10,12 +10,31 @@ import {
   createTenantViaSuperadmin,
   createCampaign,
   registerScreen,
+  apiRequest,
   jsonRequest,
   cleanupAll,
   supabaseAdmin,
   trackUser,
   waitUntil,
 } from '../helpers';
+
+describe('DOCS-INT-01: docs endpoints are public and reachable', () => {
+  it('GET /v1/openapi.json — public, valid JSON, non-empty paths', async () => {
+    const res = await apiRequest('/v1/openapi.json');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.paths).toBeTruthy();
+    expect(Object.keys(body.paths).length).toBeGreaterThan(0);
+  });
+
+  it('GET /docs — public, HTML referencing the spec URL', async () => {
+    const res = await apiRequest('/docs');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    const html = await res.text();
+    expect(html).toContain('/v1/openapi.json');
+  });
+});
 
 describe('ADMIN-INT-06/07: reinvite', () => {
   afterAll(cleanupAll);

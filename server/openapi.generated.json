@@ -1,0 +1,1187 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "ad-server API",
+    "version": "1.0.0",
+    "description": "Multi-tenant ad-serving API for digital signage / DOOH inventory. Generated at build time from this repo's Zod request schemas — see PROJECT_PLAN.md's 04j section for how and why."
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Same origin as this spec"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health"
+    },
+    {
+      "name": "Auth"
+    },
+    {
+      "name": "Superadmin — Tenants"
+    },
+    {
+      "name": "Superadmin — Ledger"
+    },
+    {
+      "name": "Tenant — Campaigns"
+    },
+    {
+      "name": "Tenant — Screens"
+    },
+    {
+      "name": "Tenant — API key & usage"
+    },
+    {
+      "name": "Device — Fulfillment"
+    },
+    {
+      "name": "Cron"
+    },
+    {
+      "name": "Docs"
+    }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Liveness check",
+        "description": "**Auth:** None (public)",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "status": "ok",
+                  "timestamp": "2026-07-12T00:00:00.000Z"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/invites/accept": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Accept a tenant invite",
+        "description": "**Auth:** None (public)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 10
+                  }
+                },
+                "required": [
+                  "token",
+                  "password"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "user": {
+                    "id": "uuid",
+                    "email": "admin@example.com"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/tenants": {
+      "get": {
+        "tags": [
+          "Superadmin — Tenants"
+        ],
+        "summary": "List all tenants",
+        "description": "**Auth:** superadmin",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "tenants": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Superadmin — Tenants"
+        ],
+        "summary": "Create a tenant (atomically creates first tenant_admin invite)",
+        "description": "**Auth:** superadmin",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "fulfillment_quota": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "admin_email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                },
+                "required": [
+                  "name",
+                  "fulfillment_quota",
+                  "admin_email"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "tenant": {},
+                  "invite": {
+                    "invite_url": "https://...",
+                    "expires_at": "2026-07-19T00:00:00.000Z"
+                  },
+                  "api_key": "plaintext-shown-once"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/tenants/{id}": {
+      "patch": {
+        "tags": [
+          "Superadmin — Tenants"
+        ],
+        "summary": "Update tenant status/quota/timeout",
+        "description": "**Auth:** superadmin",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "deactivated"
+                    ]
+                  },
+                  "fulfillment_quota": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "reservation_timeout_seconds": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "tenant": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Superadmin — Tenants"
+        ],
+        "summary": "Get a tenant with its campaigns and screens",
+        "description": "**Auth:** superadmin",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "tenant": {},
+                  "campaigns": [],
+                  "screens": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/tenants/{id}/reinvite": {
+      "post": {
+        "tags": [
+          "Superadmin — Tenants"
+        ],
+        "summary": "Re-invite a tenant with no accepted tenant_admin",
+        "description": "**Auth:** superadmin",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "invite": {
+                    "invite_url": "https://...",
+                    "expires_at": "2026-07-19T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/ledger": {
+      "get": {
+        "tags": [
+          "Superadmin — Ledger"
+        ],
+        "summary": "Cross-tenant fulfillment ledger (paginated)",
+        "description": "**Auth:** superadmin",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "fulfillments": [],
+                  "next_cursor": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/system-health": {
+      "get": {
+        "tags": [
+          "Superadmin — Ledger"
+        ],
+        "summary": "Windowed system health metrics",
+        "description": "**Auth:** superadmin",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "request_rate_per_min": 0,
+                  "error_rate": 0,
+                  "reservation_timeout_rate": 0,
+                  "no_eligible_campaign_rate": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/campaigns": {
+      "get": {
+        "tags": [
+          "Tenant — Campaigns"
+        ],
+        "summary": "List campaigns",
+        "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "campaigns": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Tenant — Campaigns"
+        ],
+        "summary": "Create a campaign",
+        "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "creative_media_path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "obligation_type": {
+                    "type": "string",
+                    "enum": [
+                      "impression_count",
+                      "share_of_voice"
+                    ]
+                  },
+                  "obligation_target": {
+                    "type": "number"
+                  },
+                  "priority_weight": {
+                    "type": "number",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "flight_start": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "flight_end": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "targeting": {
+                    "type": "object",
+                    "properties": {
+                      "daypart": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "start": {
+                              "type": "string",
+                              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+                            },
+                            "end": {
+                              "type": "string",
+                              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+                            }
+                          },
+                          "required": [
+                            "start",
+                            "end"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "days_of_week": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 7
+                        }
+                      },
+                      "geo": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "all",
+                              "state",
+                              "zip"
+                            ]
+                          },
+                          "values": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "screen": {
+                        "type": "object",
+                        "properties": {
+                          "aspect_ratios": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "resolutions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "orientations": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "landscape",
+                                "portrait"
+                              ]
+                            }
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "geo"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "active",
+                      "paused",
+                      "archived"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "creative_media_path",
+                  "obligation_type",
+                  "obligation_target",
+                  "flight_start",
+                  "flight_end"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "campaign": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/campaigns/{id}": {
+      "patch": {
+        "tags": [
+          "Tenant — Campaigns"
+        ],
+        "summary": "Update a campaign",
+        "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "creative_media_path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "obligation_type": {
+                    "type": "string",
+                    "enum": [
+                      "impression_count",
+                      "share_of_voice"
+                    ]
+                  },
+                  "obligation_target": {
+                    "type": "number"
+                  },
+                  "priority_weight": {
+                    "type": "number",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "flight_start": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "flight_end": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "targeting": {
+                    "type": "object",
+                    "properties": {
+                      "daypart": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "start": {
+                              "type": "string",
+                              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+                            },
+                            "end": {
+                              "type": "string",
+                              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+                            }
+                          },
+                          "required": [
+                            "start",
+                            "end"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "days_of_week": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 7
+                        }
+                      },
+                      "geo": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "all",
+                              "state",
+                              "zip"
+                            ]
+                          },
+                          "values": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "screen": {
+                        "type": "object",
+                        "properties": {
+                          "aspect_ratios": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "resolutions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "orientations": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "landscape",
+                                "portrait"
+                              ]
+                            }
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "geo"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "active",
+                      "paused",
+                      "archived"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "campaign": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/campaigns/{id}/pacing": {
+      "get": {
+        "tags": [
+          "Tenant — Campaigns"
+        ],
+        "summary": "Campaign pacing / delivery progress",
+        "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "delivered": 0,
+                  "remaining": null,
+                  "sov_actual": null,
+                  "sov_target": null,
+                  "no_eligible_screens": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/screens": {
+      "get": {
+        "tags": [
+          "Tenant — Screens"
+        ],
+        "summary": "List screens",
+        "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "screens": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Tenant — Screens"
+        ],
+        "summary": "Register a screen",
+        "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "state": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 2,
+                    "nullable": true
+                  },
+                  "zip": {
+                    "type": "string",
+                    "minLength": 1,
+                    "nullable": true
+                  },
+                  "aspect_ratio": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "resolution": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "orientation": {
+                    "type": "string",
+                    "enum": [
+                      "landscape",
+                      "portrait"
+                    ]
+                  },
+                  "is_simulated": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "label",
+                  "aspect_ratio",
+                  "resolution",
+                  "orientation"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "screen": {},
+                  "device_api_key": "plaintext-shown-once"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/screens/{id}": {
+      "patch": {
+        "tags": [
+          "Tenant — Screens"
+        ],
+        "summary": "Update a screen",
+        "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "state": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 2,
+                    "nullable": true
+                  },
+                  "zip": {
+                    "type": "string",
+                    "minLength": 1,
+                    "nullable": true
+                  },
+                  "aspect_ratio": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "resolution": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "orientation": {
+                    "type": "string",
+                    "enum": [
+                      "landscape",
+                      "portrait"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "inactive"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "screen": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/screens/{id}/rotate-key": {
+      "post": {
+        "tags": [
+          "Tenant — Screens"
+        ],
+        "summary": "Rotate a screen device API key",
+        "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "device_api_key": "plaintext-shown-once"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenant/api-key": {
+      "get": {
+        "tags": [
+          "Tenant — API key & usage"
+        ],
+        "summary": "View tenant API key status",
+        "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "key_prefix": "abcd1234",
+                  "status": "active"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenant/api-key/rotate": {
+      "post": {
+        "tags": [
+          "Tenant — API key & usage"
+        ],
+        "summary": "Rotate tenant API key",
+        "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "api_key": "plaintext-shown-once"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenant/usage": {
+      "get": {
+        "tags": [
+          "Tenant — API key & usage"
+        ],
+        "summary": "Tenant-wide fulfillment quota usage",
+        "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "used": 0,
+                  "quota": 1000
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenant/usage/by-screen": {
+      "get": {
+        "tags": [
+          "Tenant — API key & usage"
+        ],
+        "summary": "Windowed fulfillment usage broken down per screen",
+        "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "window_hours": 24,
+                  "screens": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fulfillments": {
+      "post": {
+        "tags": [
+          "Device — Fulfillment"
+        ],
+        "summary": "Request a fulfillment (reserve an eligible campaign)",
+        "description": "**Auth:** device API key",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "fulfillment_id": "uuid",
+                  "campaign_id": "uuid",
+                  "media_ref": "https://...",
+                  "reserved_expires_at": "2026-07-12T00:05:00.000Z"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fulfillments/{id}/report": {
+      "post": {
+        "tags": [
+          "Device — Fulfillment"
+        ],
+        "summary": "Report a fulfillment outcome",
+        "description": "**Auth:** device API key",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "played",
+                      "skipped",
+                      "failed"
+                    ]
+                  },
+                  "played_duration_ms": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "outcome"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "status": "confirmed"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/cron/expire-reservations": {
+      "get": {
+        "tags": [
+          "Cron"
+        ],
+        "summary": "Vercel Cron backstop for reservation expiry",
+        "description": "**Auth:** CRON_SECRET header",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "expired": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/openapi.json": {
+      "get": {
+        "tags": [
+          "Docs"
+        ],
+        "summary": "This OpenAPI 3.0 spec",
+        "description": "**Auth:** None (public)",
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
+    "/docs": {
+      "get": {
+        "tags": [
+          "Docs"
+        ],
+        "summary": "Swagger UI over the spec above",
+        "description": "**Auth:** None (public)",
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    }
+  }
+}
