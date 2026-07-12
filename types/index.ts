@@ -136,6 +136,7 @@ export const ErrorCode = {
   LATE_REPORT: 'LATE_REPORT',
   NOT_FOUND: 'NOT_FOUND',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
+  TENANT_ALREADY_HAS_ADMIN: 'TENANT_ALREADY_HAS_ADMIN',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

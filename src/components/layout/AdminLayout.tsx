@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/auth';
 const NAV_ITEMS = [
   { to: '/admin/tenants', label: 'Tenants' },
   { to: '/admin/ledger', label: 'Ledger' },
+  { to: '/admin/health', label: 'Health' },
 ];
 
 export function AdminLayout() {

@@ -1,19 +1,27 @@
-import { Hono } from 'hono';
-import { handle } from 'hono/vercel';
+import { OpenAPIHono } from '@hono/zod-openapi';
+import type { ExecutionContext } from 'hono';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 import invites from '../server/invites';
 import adminTenants from '../server/admin-tenants';
 import adminLedger from '../server/admin-ledger';
+import adminHealth from '../server/admin-health';
 import tenantSelf from '../server/tenant-self';
 import campaigns from '../server/campaigns';
 import screens from '../server/screens';
 import fulfillments from '../server/fulfillments';
 import cron from '../server/cron';
+import { mountDocs } from '../server/docs';
 
 export const config = { runtime: 'edge' };
 
-const app = new Hono();
+// OpenAPIHono, not plain Hono, since 04i (docs.ts) — every route file in
+// server/ is itself an OpenAPIHono router; mounting them here via
+// `app.route()` merges each one's OpenAPI registry into this top-level app's
+// (see @hono/zod-openapi's `route()` override), which is what
+// GET /v1/openapi.json / GET /docs (mounted last, via mountDocs) actually
+// render.
+const app = new OpenAPIHono();
 
 app.use(
   '*',
@@ -33,13 +41,12 @@ app.route('/api/invites', invites);
 app.route('/api/admin/tenants', adminTenants);
 
 // Superadmin — cross-tenant ledger (04f). Auth applied inside admin-ledger.ts.
-// GET /api/admin/system-health is NOT built — see build-report.md's 04f
-// "recommended follow-up scope": no table anywhere logs a fulfillment
-// *attempt* (only successful reservations get a `fulfillments` row), so
-// request_rate_per_min/error_rate/no_eligible_campaign_rate can't be computed
-// honestly from existing data. docs.ts (openapi.json, /docs) is also unbuilt
-// — no phase in PROJECT_PLAN.md ever assigned it an owner.
 app.route('/api/admin/ledger', adminLedger);
+
+// Superadmin — GET /api/admin/system-health (04i). Auth applied inside
+// admin-health.ts. Backed by fulfillment_attempts (see migration 0005) +
+// fulfillments — see architecture.md's Data Model / API Endpoints sections.
+app.route('/api/admin/system-health', adminHealth);
 
 // Tenant — JWT-or-tenant-key (architecture.md § Auth Model, mechanism 2).
 // Auth applied inside each router via tenantAccessMiddleware.
@@ -56,9 +63,12 @@ app.route('/v1/fulfillments', fulfillments);
 // CRON_SECRET gate.
 app.route('/api/cron', cron);
 
-// Remaining route modules (admin system-health/ledger, docs) are mounted in
-// later phases — see architecture.md § File Structure and PROJECT_PLAN.md's
-// 04d+ sessions.
+// GET /v1/openapi.json, GET /docs (04i) — mounted last so every route above
+// is already merged into `app`'s OpenAPI registry by the time a request for
+// either of these actually renders the spec (though `.doc()` reads the
+// registry lazily per-request, so the order here isn't itself load-bearing —
+// see docs.ts's header comment for why this can't be a routed sub-app).
+mountDocs(app);
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) {
@@ -80,4 +90,12 @@ app.onError((err, c) => {
 });
 
 export { app };
-export default handle(app);
+
+// hono/vercel's handle(app) is `(app) => (req) => app.fetch(req)` — a
+// one-argument call that discards Vercel's Edge ExecutionContext (confirmed
+// by reading node_modules/hono/dist/adapter/vercel/handler.js). POST
+// /v1/fulfillments needs that context to log fulfillment_attempts rows via
+// c.executionCtx.waitUntil(...) without adding hot-path latency (architecture.md
+// § Data Model, fulfillment_attempts), so the entrypoint forwards it directly
+// instead of going through handle().
+export default (req: Request, ctx: ExecutionContext) => app.fetch(req, undefined, ctx);

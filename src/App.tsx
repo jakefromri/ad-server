@@ -13,6 +13,7 @@ import TenantsList from '@/pages/admin/TenantsList';
 import TenantNew from '@/pages/admin/TenantNew';
 import TenantDetail from '@/pages/admin/TenantDetail';
 import Ledger from '@/pages/admin/Ledger';
+import SystemHealth from '@/pages/admin/SystemHealth';
 
 export default function App() {
   return (
@@ -40,6 +41,7 @@ export default function App() {
           <Route path="tenants/new" element={<TenantNew />} />
           <Route path="tenants/:id" element={<TenantDetail />} />
           <Route path="ledger" element={<Ledger />} />
+          <Route path="health" element={<SystemHealth />} />
         </Route>
       </Route>
 

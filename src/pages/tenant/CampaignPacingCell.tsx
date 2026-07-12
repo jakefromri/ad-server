@@ -1,4 +1,5 @@
 import { useCampaignPacing } from '@/hooks/useCampaigns';
+import { Badge } from '@/components/ui/badge';
 import type { Campaign } from '@shared/index';
 
 // Coarse tenant-wide approximation, not the request-time eligible-pool math
@@ -11,6 +12,23 @@ import type { Campaign } from '@shared/index';
 const SOV_CAVEAT =
   'Approximate: measured against every active campaign tenant-wide, not just this campaign’s real competitive pool. Can look artificially low if you also run a broad, untargeted campaign.';
 
+// no_eligible_screens (04i, follow-up scoping session) — a live structural
+// check (targeting time-coverage + current active-screen fleet match), not a
+// "zero requests seen" signal. See architecture.md's GET
+// /v1/campaigns/:id/pacing doc comment for the accepted fidelity gap this
+// implies (a campaign matching screens that exist but never send traffic
+// still reads as eligible here).
+const NO_ELIGIBLE_SCREENS_TOOLTIP =
+  "This campaign's targeting doesn't currently match any active screen in your fleet (or its daypart/day-of-week window never has any coverage) — it can't deliver until that changes.";
+
+function NoEligibleScreensBadge() {
+  return (
+    <Badge variant="warning" title={NO_ELIGIBLE_SCREENS_TOOLTIP} className="cursor-help">
+      No eligible screens
+    </Badge>
+  );
+}
+
 export function CampaignPacingCell({ campaign }: { campaign: Campaign }) {
   const { data, isLoading } = useCampaignPacing(campaign.id);
 
@@ -18,16 +36,22 @@ export function CampaignPacingCell({ campaign }: { campaign: Campaign }) {
 
   if (campaign.obligation_type === 'impression_count') {
     return (
-      <span>
-        {data.delivered} / {campaign.obligation_target}{' '}
-        <span className="text-muted-foreground">({data.remaining} left)</span>
+      <span className="flex items-center gap-2">
+        <span>
+          {data.delivered} / {campaign.obligation_target}{' '}
+          <span className="text-muted-foreground">({data.remaining} left)</span>
+        </span>
+        {data.no_eligible_screens && <NoEligibleScreensBadge />}
       </span>
     );
   }
 
   return (
-    <span title={SOV_CAVEAT} className="cursor-help underline decoration-dotted">
-      {data.sov_actual?.toFixed(1)}% / {data.sov_target}% target
+    <span className="flex items-center gap-2">
+      <span title={SOV_CAVEAT} className="cursor-help underline decoration-dotted">
+        {data.sov_actual?.toFixed(1)}% / {data.sov_target}% target
+      </span>
+      {data.no_eligible_screens && <NoEligibleScreensBadge />}
     </span>
   );
 }

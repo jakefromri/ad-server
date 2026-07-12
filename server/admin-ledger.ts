@@ -9,15 +9,15 @@
 // with an identical timestamp) so the cursor is stable under concurrent
 // inserts between pages.
 
-import { Hono } from 'hono';
 import { ErrorCode } from '../types';
 import { supabaseAdmin } from './supabase';
 import { humanAuthMiddleware, requireRole } from './human-auth';
+import { newRouter, createRoute, z, errorResponses, type RouteContext } from './openapi';
 
-const router = new Hono();
+const router = newRouter();
 router.use('*', humanAuthMiddleware, requireRole('superadmin'));
 
-const VALID_STATUSES = ['reserved', 'confirmed', 'expired', 'failed'];
+const VALID_STATUSES = ['reserved', 'confirmed', 'expired', 'failed'] as const;
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
@@ -40,15 +40,32 @@ function decodeCursor(cursor: string): { requestedAt: string; id: string } | nul
   }
 }
 
-router.get('/', async (c) => {
-  const tenantId = c.req.query('tenant_id');
-  const status = c.req.query('status');
-  const cursor = c.req.query('cursor');
-  const limitParam = c.req.query('limit');
+const listRoute = createRoute({
+  method: 'get',
+  path: '/',
+  tags: ['Admin — Ledger'],
+  summary: 'Cross-tenant fulfillment ledger (paginated)',
+  request: {
+    query: z.object({
+      tenant_id: z.string().optional(),
+      status: z.enum(VALID_STATUSES).optional(),
+      cursor: z.string().optional(),
+      limit: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Ledger page',
+      content: {
+        'application/json': { schema: z.object({ fulfillments: z.array(z.record(z.unknown())), next_cursor: z.string().nullable() }) },
+      },
+    },
+    ...errorResponses(400, 401, 403),
+  },
+});
 
-  if (status && !VALID_STATUSES.includes(status)) {
-    return c.json({ error: `status must be one of ${VALID_STATUSES.join(', ')}`, code: ErrorCode.VALIDATION_ERROR }, 400);
-  }
+router.openapi(listRoute, async (c: RouteContext) => {
+  const { tenant_id: tenantId, status, cursor, limit: limitParam } = c.req.valid('query');
 
   let limit = DEFAULT_LIMIT;
   if (limitParam) {

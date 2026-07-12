@@ -11,16 +11,24 @@
 // header comment for why that step can't be plain sequential supabase-js
 // calls).
 
-import { Hono } from 'hono';
-import { z } from 'zod';
 import { ErrorCode, type CampaignTargeting } from '../types';
 import { supabaseAdmin } from './supabase';
 import { deviceAuthMiddleware } from './device-auth';
 import { filterEligibleCampaigns, scoreEligiblePool, type CampaignForEligibility } from './reconciliation';
+import { logFulfillmentAttempt } from './fulfillment-attempts';
 import type { TargetingScreen } from './targeting';
+import { newRouter, createRoute, z, errorResponses, type RouteContext } from './openapi';
 
-const router = new Hono();
-router.use('*', deviceAuthMiddleware);
+const router = newRouter();
+
+// deviceAuthMiddleware is NOT mounted via a blanket `router.use('*', ...)`
+// here (unlike every other router in server/) — POST '/' needs to catch its
+// own auth failures to log a fulfillment_attempts row with outcome
+// 'auth_error' (tenant_id/screen_id both null, since no device context ever
+// gets set — architecture.md § Data Model). '/:id/report' has no such
+// requirement (fulfillment_attempts is scoped to POST /v1/fulfillments only
+// per architecture.md), so it keeps the plain middleware mount.
+router.use('/:id/report', deviceAuthMiddleware);
 
 const MAX_ATTEMPTS = 3;
 
@@ -150,105 +158,162 @@ async function attemptReservation(params: {
   return row;
 }
 
-router.post('/', async (c) => {
-  const device = c.get('device');
+const requestFulfillmentRoute = createRoute({
+  method: 'post',
+  path: '/',
+  tags: ['Fulfillments'],
+  summary: 'Request a fulfillment for the calling device\'s screen',
+  responses: {
+    201: {
+      description: 'Reserved',
+      content: {
+        'application/json': {
+          schema: z.object({
+            fulfillment_id: z.string(),
+            campaign_id: z.string(),
+            media_ref: z.string(),
+            reserved_expires_at: z.string(),
+          }),
+        },
+      },
+    },
+    200: {
+      description: 'No eligible campaign',
+      content: { 'application/json': { schema: z.object({ fulfilled: z.literal(false), reason: z.literal('no_eligible_campaigns') }) } },
+    },
+    ...errorResponses(401, 403, 429),
+  },
+});
 
-  const { data: tenant } = await supabaseAdmin
-    .from('tenants')
-    .select('fulfillment_quota, reservation_timeout_seconds')
-    .eq('id', device.tenant_id)
-    .single();
-
-  if (!tenant) return c.json({ error: 'Tenant not found', code: ErrorCode.NOT_FOUND }, 404);
-
-  // Step 2 — fast unlocked quota pre-check (QUOTA-UNIT-01: must short-circuit
-  // before the campaign query even runs, for the common already-over-quota
-  // case). Not authoritative — reserve_fulfillment re-checks under lock.
-  const { data: usage } = await supabaseAdmin
-    .from('fulfillment_quota_usage')
-    .select('used_count')
-    .eq('tenant_id', device.tenant_id)
-    .maybeSingle();
-
-  if ((usage?.used_count ?? 0) >= Number(tenant.fulfillment_quota)) {
-    return c.json({ error: 'Fulfillment quota exceeded', code: ErrorCode.QUOTA_EXCEEDED }, 429);
+// Handler param is `c: RouteContext`, here and in every other 04i-converted route —
+// @hono/zod-openapi's typed-response system requires every `c.json(...)`
+// call in a handler to structurally match one declared `responses` status
+// entry, verified via TS overload resolution across the whole function
+// body. That breaks down across handlers with several differently-shaped
+// success/error branches (a rough edge in the library's typing, not a
+// runtime concern — request validation and the actual response body are
+// unaffected either way).
+router.openapi(requestFulfillmentRoute, async (c: RouteContext) => {
+  // Manually invoked (not `router.use`) so a thrown auth failure can be
+  // logged with a fulfillment_attempts row before propagating — see this
+  // file's header comment on why '/' doesn't share '/:id/report''s plain
+  // middleware mount.
+  try {
+    await deviceAuthMiddleware(c, async () => {});
+  } catch (err) {
+    logFulfillmentAttempt(c, null, null, 'auth_error');
+    throw err;
   }
 
-  const { data: screen } = await supabaseAdmin
-    .from('screens')
-    .select('state, zip, aspect_ratio, resolution, orientation')
-    .eq('id', device.screen_id)
-    .single();
+  const device = c.get('device');
 
-  if (!screen) return c.json({ error: 'Screen not found', code: ErrorCode.NOT_FOUND }, 404);
+  try {
+    const { data: tenant } = await supabaseAdmin
+      .from('tenants')
+      .select('fulfillment_quota, reservation_timeout_seconds')
+      .eq('id', device.tenant_id)
+      .single();
 
-  const now = new Date();
+    if (!tenant) return c.json({ error: 'Tenant not found', code: ErrorCode.NOT_FOUND }, 404);
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const { eligible, mediaByCampaign } = await loadEligiblePool(device.tenant_id, screen, now);
-    if (eligible.length === 0) {
-      return c.json({ fulfilled: false, reason: 'no_eligible_campaigns' });
-    }
+    // Step 2 — fast unlocked quota pre-check (QUOTA-UNIT-01: must short-circuit
+    // before the campaign query even runs, for the common already-over-quota
+    // case). Not authoritative — reserve_fulfillment re-checks under lock.
+    const { data: usage } = await supabaseAdmin
+      .from('fulfillment_quota_usage')
+      .select('used_count')
+      .eq('tenant_id', device.tenant_id)
+      .maybeSingle();
 
-    const { winner, tier, candidates } = scoreEligiblePool(eligible, now);
-    if (!winner) {
-      return c.json({ fulfilled: false, reason: 'no_eligible_campaigns' });
-    }
-
-    if (candidates.length > 1) {
-      // Near-tie winner-selection detail — scope.md's "log enough detail to
-      // reconstruct after the fact why a given campaign won" flag. No
-      // dedicated ledger table for this in architecture.md's Data Model;
-      // Vercel's function logs are the pragmatic MVP store.
-      console.log('reconciliation_near_tie', {
-        tenant_id: device.tenant_id,
-        screen_id: device.screen_id,
-        attempt,
-        tier,
-        winner_id: winner.id,
-        candidates: candidates.map((cand) => ({ campaign_id: cand.campaign.id, pacing_pressure: cand.pacingPressure })),
-      });
-    }
-
-    const mediaRef = mediaByCampaign.get(winner.id);
-    if (!mediaRef) continue; // campaign vanished between load and here — retry fresh
-
-    const result = await attemptReservation({
-      tenantId: device.tenant_id,
-      campaignId: winner.id,
-      screenId: device.screen_id,
-      mediaRef,
-      reservationTimeoutSeconds: tenant.reservation_timeout_seconds,
-      obligationType: winner.obligation_type,
-      obligationTarget: winner.obligation_target,
-    });
-
-    if (result.out_result_status === 'quota_exceeded') {
-      // Authoritative check failed — being over quota isn't fixed by trying a
-      // different campaign, so no retry (architecture.md).
+    if ((usage?.used_count ?? 0) >= Number(tenant.fulfillment_quota)) {
+      logFulfillmentAttempt(c, device.tenant_id, device.screen_id, 'quota_exceeded');
       return c.json({ error: 'Fulfillment quota exceeded', code: ErrorCode.QUOTA_EXCEEDED }, 429);
     }
 
-    if (result.out_result_status === 'reserved') {
-      return c.json(
-        {
-          fulfillment_id: result.out_fulfillment_id,
-          campaign_id: winner.id,
-          media_ref: mediaRef,
-          reserved_expires_at: result.out_reserved_expires_at,
-        },
-        201
-      );
+    const { data: screen } = await supabaseAdmin
+      .from('screens')
+      .select('state, zip, aspect_ratio, resolution, orientation')
+      .eq('id', device.screen_id)
+      .single();
+
+    if (!screen) return c.json({ error: 'Screen not found', code: ErrorCode.NOT_FOUND }, 404);
+
+    const now = new Date();
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const { eligible, mediaByCampaign } = await loadEligiblePool(device.tenant_id, screen, now);
+      if (eligible.length === 0) {
+        logFulfillmentAttempt(c, device.tenant_id, device.screen_id, 'no_eligible_campaigns');
+        return c.json({ fulfilled: false, reason: 'no_eligible_campaigns' });
+      }
+
+      const { winner, tier, candidates } = scoreEligiblePool(eligible, now);
+      if (!winner) {
+        logFulfillmentAttempt(c, device.tenant_id, device.screen_id, 'no_eligible_campaigns');
+        return c.json({ fulfilled: false, reason: 'no_eligible_campaigns' });
+      }
+
+      if (candidates.length > 1) {
+        // Near-tie winner-selection detail — scope.md's "log enough detail to
+        // reconstruct after the fact why a given campaign won" flag. No
+        // dedicated ledger table for this in architecture.md's Data Model;
+        // Vercel's function logs are the pragmatic MVP store.
+        console.log('reconciliation_near_tie', {
+          tenant_id: device.tenant_id,
+          screen_id: device.screen_id,
+          attempt,
+          tier,
+          winner_id: winner.id,
+          candidates: candidates.map((cand) => ({ campaign_id: cand.campaign.id, pacing_pressure: cand.pacingPressure })),
+        });
+      }
+
+      const mediaRef = mediaByCampaign.get(winner.id);
+      if (!mediaRef) continue; // campaign vanished between load and here — retry fresh
+
+      const result = await attemptReservation({
+        tenantId: device.tenant_id,
+        campaignId: winner.id,
+        screenId: device.screen_id,
+        mediaRef,
+        reservationTimeoutSeconds: tenant.reservation_timeout_seconds,
+        obligationType: winner.obligation_type,
+        obligationTarget: winner.obligation_target,
+      });
+
+      if (result.out_result_status === 'quota_exceeded') {
+        // Authoritative check failed — being over quota isn't fixed by trying a
+        // different campaign, so no retry (architecture.md).
+        logFulfillmentAttempt(c, device.tenant_id, device.screen_id, 'quota_exceeded');
+        return c.json({ error: 'Fulfillment quota exceeded', code: ErrorCode.QUOTA_EXCEEDED }, 429);
+      }
+
+      if (result.out_result_status === 'reserved') {
+        logFulfillmentAttempt(c, device.tenant_id, device.screen_id, 'fulfilled');
+        return c.json(
+          {
+            fulfillment_id: result.out_fulfillment_id,
+            campaign_id: winner.id,
+            media_ref: mediaRef,
+            reserved_expires_at: result.out_reserved_expires_at,
+          },
+          201
+        );
+      }
+
+      // 'campaign_no_longer_eligible' — a concurrent request claimed the last
+      // unit of this campaign's obligation since scoring ran. Loop continues:
+      // next attempt re-queries and re-scores fresh, never reuses this
+      // attempt's eligible set or winner (RACE-INT-02).
     }
 
-    // 'campaign_no_longer_eligible' — a concurrent request claimed the last
-    // unit of this campaign's obligation since scoring ran. Loop continues:
-    // next attempt re-queries and re-scores fresh, never reuses this
-    // attempt's eligible set or winner (RACE-INT-02).
+    // All MAX_ATTEMPTS attempts lost the campaign-row race (RACE-INT-03).
+    logFulfillmentAttempt(c, device.tenant_id, device.screen_id, 'no_eligible_campaigns');
+    return c.json({ fulfilled: false, reason: 'no_eligible_campaigns' });
+  } catch (err) {
+    logFulfillmentAttempt(c, device.tenant_id, device.screen_id, 'server_error');
+    throw err;
   }
-
-  // All MAX_ATTEMPTS attempts lost the campaign-row race (RACE-INT-03).
-  return c.json({ fulfilled: false, reason: 'no_eligible_campaigns' });
 });
 
 const reportSchema = z.object({
@@ -256,15 +321,25 @@ const reportSchema = z.object({
   played_duration_ms: z.number().int().nonnegative().optional(),
 });
 
-router.post('/:id/report', async (c) => {
-  const device = c.get('device');
-  const id = c.req.param('id');
+const reportRoute = createRoute({
+  method: 'post',
+  path: '/{id}/report',
+  tags: ['Fulfillments'],
+  summary: 'Report the outcome of a reserved fulfillment',
+  request: {
+    params: z.object({ id: z.string() }),
+    body: { content: { 'application/json': { schema: reportSchema } } },
+  },
+  responses: {
+    200: { description: 'Reported', content: { 'application/json': { schema: z.object({ status: z.enum(['confirmed', 'released']) }) } } },
+    ...errorResponses(400, 401, 403, 404, 409),
+  },
+});
 
-  const parsed = reportSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request', code: ErrorCode.VALIDATION_ERROR }, 400);
-  }
-  const { outcome, played_duration_ms } = parsed.data;
+router.openapi(reportRoute, async (c: RouteContext) => {
+  const device = c.get('device');
+  const { id } = c.req.valid('param');
+  const { outcome, played_duration_ms } = c.req.valid('json');
 
   const { data: fulfillment, error: fetchError } = await supabaseAdmin
     .from('fulfillments')
