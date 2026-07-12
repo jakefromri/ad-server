@@ -5,7 +5,7 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { ErrorCode } from '../../types';
+import { ErrorCode } from '../types';
 import { supabaseAdmin } from './supabase';
 import { generateApiKey, hashApiKey } from './hash';
 import { tenantAccessMiddleware } from './tenant-access';

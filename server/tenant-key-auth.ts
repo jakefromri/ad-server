@@ -6,7 +6,7 @@
 
 import { createMiddleware } from 'hono/factory';
 import { HTTPException } from 'hono/http-exception';
-import { ErrorCode } from '../../types';
+import { ErrorCode } from '../types';
 import { supabaseAdmin } from './supabase';
 import { hashApiKey } from './hash';
 import type { AuthContext } from './human-auth';

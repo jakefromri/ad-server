@@ -6,7 +6,7 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { ErrorCode } from '../../types';
+import { ErrorCode } from '../types';
 import { supabaseAdmin } from './supabase';
 
 const router = new Hono();

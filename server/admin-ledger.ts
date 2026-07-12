@@ -10,7 +10,7 @@
 // inserts between pages.
 
 import { Hono } from 'hono';
-import { ErrorCode } from '../../types';
+import { ErrorCode } from '../types';
 import { supabaseAdmin } from './supabase';
 import { humanAuthMiddleware, requireRole } from './human-auth';
 

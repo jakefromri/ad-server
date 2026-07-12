@@ -3,7 +3,7 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { ErrorCode } from '../../types';
+import { ErrorCode } from '../types';
 import { supabaseAdmin } from './supabase';
 import { tenantAccessMiddleware } from './tenant-access';
 import { checkSovOverselling } from './sov';

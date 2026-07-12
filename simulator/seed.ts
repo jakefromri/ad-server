@@ -20,7 +20,7 @@
 
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { supabaseAdmin } from '../api/lib/supabase';
+import { supabaseAdmin } from '../server/supabase';
 import type { Campaign } from '../types';
 
 const TENANT_NAME = 'Tenant 0';

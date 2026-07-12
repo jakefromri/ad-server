@@ -2,7 +2,7 @@
 // Mounted at /v1/tenant behind tenantAccessMiddleware (JWT-or-tenant-key).
 
 import { Hono } from 'hono';
-import { ErrorCode } from '../../types';
+import { ErrorCode } from '../types';
 import { supabaseAdmin } from './supabase';
 import { generateApiKey, hashApiKey } from './hash';
 import { tenantAccessMiddleware } from './tenant-access';
