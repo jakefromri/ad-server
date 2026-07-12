@@ -74,15 +74,12 @@ export default function Settings() {
       <Card className="max-w-md">
         <CardHeader>
           <CardTitle>API documentation</CardTitle>
-          <CardDescription>Full OpenAPI spec and interactive docs for the campaign/screen management endpoints.</CardDescription>
+          {/* GET /v1/openapi.json / GET /docs (04i) attempted and reverted in
+              the same phase — @hono/zod-openapi isn't deployable on this
+              project's Vercel Edge Function (see api/index.ts's header
+              comment). No docs page to link to yet. */}
+          <CardDescription>Coming soon — the OpenAPI spec/docs page hit a Vercel deployment blocker and was reverted.</CardDescription>
         </CardHeader>
-        <CardFooter>
-          <Button asChild variant="outline">
-            <a href={`${import.meta.env.VITE_API_BASE_URL as string}/docs`} target="_blank" rel="noreferrer">
-              Open API docs
-            </a>
-          </Button>
-        </CardFooter>
       </Card>
     </div>
   );

@@ -11,40 +11,17 @@
 // for the three ratios (a stable-enough denominator that a 5-minute one
 // wouldn't reliably have).
 
+import { Hono } from 'hono';
 import { supabaseAdmin } from './supabase';
 import { humanAuthMiddleware, requireRole } from './human-auth';
-import { newRouter, createRoute, z, errorResponses, type RouteContext } from './openapi';
 
-const router = newRouter();
+const router = new Hono();
 router.use('*', humanAuthMiddleware, requireRole('superadmin'));
 
 const RATE_WINDOW_MINUTES = 5;
 const RATIO_WINDOW_MINUTES = 60;
 
-const healthRoute = createRoute({
-  method: 'get',
-  path: '/',
-  tags: ['Admin — System health'],
-  summary: 'Cross-tenant request rate / error rate / timeout rate / no-eligible-campaign rate',
-  responses: {
-    200: {
-      description: 'Windowed system health metrics',
-      content: {
-        'application/json': {
-          schema: z.object({
-            request_rate_per_min: z.number(),
-            error_rate: z.number(),
-            reservation_timeout_rate: z.number(),
-            no_eligible_campaign_rate: z.number(),
-          }),
-        },
-      },
-    },
-    ...errorResponses(401, 403),
-  },
-});
-
-router.openapi(healthRoute, async (c: RouteContext) => {
+router.get('/', async (c) => {
   const now = Date.now();
   const rateWindowStart = new Date(now - RATE_WINDOW_MINUTES * 60_000).toISOString();
   const ratioWindowStart = new Date(now - RATIO_WINDOW_MINUTES * 60_000).toISOString();

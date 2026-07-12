@@ -2,50 +2,26 @@
 // route glob the human-auth middleware guards (Builder spec's public-routes
 // checklist item). Reused as-is from ComposableAuth
 // (hello-world/apps/api/src/routes/invites.ts), adapted to ad-server's
-// shared types/error codes. Converted to createRoute/OpenAPIHono in 04i (see
-// server/openapi.ts) so it's documented at GET /v1/openapi.json.
+// shared types/error codes.
 
+import { Hono } from 'hono';
+import { z } from 'zod';
 import { ErrorCode } from '../types';
 import { supabaseAdmin } from './supabase';
-import { newRouter, createRoute, z, errorResponses, type RouteContext } from './openapi';
 
-const router = newRouter();
+const router = new Hono();
 
 const acceptSchema = z.object({
   token: z.string().min(1, 'Token is required'),
   password: z.string().min(10, 'Password must be at least 10 characters'),
 });
 
-const acceptRoute = createRoute({
-  method: 'post',
-  path: '/accept',
-  tags: ['Invites'],
-  summary: 'Accept a tenant_admin invite',
-  request: {
-    body: { content: { 'application/json': { schema: acceptSchema } } },
-  },
-  responses: {
-    201: {
-      description: 'Invite accepted, Supabase Auth user created',
-      content: { 'application/json': { schema: z.object({ user: z.object({ id: z.string(), email: z.string() }) }) } },
-    },
-    ...errorResponses(400, 409),
-  },
-});
-
-// Handler param is `c: RouteContext`, here and in every other 04i-converted route —
-// @hono/zod-openapi's typed-response system requires every `c.json(...)`
-// call in a handler to structurally match one declared `responses` status
-// entry, verified via TS overload resolution across the whole function body.
-// That breaks down across handlers with several differently-shaped
-// success/error branches (a rough edge in the library's typing, not a
-// runtime concern — request validation and the actual response body are
-// unaffected either way; `c.req.valid(...)` still returns the right runtime
-// value, just untyped). `route`'s `responses` object is still exactly what
-// GET /v1/openapi.json / GET /docs render, so documentation accuracy isn't
-// affected by loosening the handler's own parameter type.
-router.openapi(acceptRoute, async (c: RouteContext) => {
-  const { token, password } = c.req.valid('json');
+router.post('/accept', async (c) => {
+  const parsed = acceptSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request', code: ErrorCode.VALIDATION_ERROR }, 400);
+  }
+  const { token, password } = parsed.data;
 
   const { data: invite, error: inviteError } = await supabaseAdmin
     .from('invites')

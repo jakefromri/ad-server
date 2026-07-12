@@ -15,8 +15,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@hono/swagger-ui": "^0.6.1",
-    "@hono/zod-openapi": "^0.16.0",
     "@radix-ui/react-dialog": "^1.1.19",
     "@radix-ui/react-label": "^2.0.2",
     "@radix-ui/react-select": "^2.3.3",
