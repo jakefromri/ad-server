@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useTenantApiKey, useRotateTenantApiKey } from '@/hooks/useTenantSelf';
-import { ApiError } from '@/lib/api';
+import { ApiError, API_BASE_URL } from '@/lib/api';
 
 export default function Settings() {
   const { data, isLoading, error } = useTenantApiKey();
@@ -74,12 +74,15 @@ export default function Settings() {
       <Card className="max-w-md">
         <CardHeader>
           <CardTitle>API documentation</CardTitle>
-          {/* GET /v1/openapi.json / GET /docs (04i) attempted and reverted in
-              the same phase — @hono/zod-openapi isn't deployable on this
-              project's Vercel Edge Function (see api/index.ts's header
-              comment). No docs page to link to yet. */}
-          <CardDescription>Coming soon — the OpenAPI spec/docs page hit a Vercel deployment blocker and was reverted.</CardDescription>
+          <CardDescription>Full endpoint reference for the campaign/screen management API.</CardDescription>
         </CardHeader>
+        <CardFooter>
+          <Button variant="outline" asChild>
+            <a href={`${API_BASE_URL}/docs`} target="_blank" rel="noopener noreferrer">
+              View API docs
+            </a>
+          </Button>
+        </CardFooter>
       </Card>
     </div>
   );
