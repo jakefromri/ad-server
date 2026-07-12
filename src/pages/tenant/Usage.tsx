@@ -1,9 +1,11 @@
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { useTenantUsage } from '@/hooks/useTenantSelf';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { useTenantUsage, useUsageByScreen } from '@/hooks/useTenantSelf';
 
 export default function Usage() {
   const { data, isLoading, error } = useTenantUsage();
+  const { data: byScreen, isLoading: byScreenLoading, error: byScreenError } = useUsageByScreen();
 
   return (
     <div className="space-y-6">
@@ -35,13 +37,52 @@ export default function Usage() {
                 style={{ width: `${data.quota > 0 ? Math.min((data.used / data.quota) * 100, 100) : 0}%` }}
               />
             </div>
-            <p className="mt-3 text-sm text-muted-foreground">
-              This is the tenant-wide total. Per-device/screen usage breakdown isn't available yet — see
-              build-report.md's 04f "recommended follow-up scope."
-            </p>
           </CardContent>
         </Card>
       ) : null}
+
+      {/* GET /v1/tenant/usage/by-screen (04i, follow-up scoping session) —
+          tied to the device-key-compromise blast-radius concern: a
+          compromised/misbehaving screen shows up here as a count spike well
+          before it would exhaust the tenant-wide quota. */}
+      <div>
+        <h2 className="text-lg font-semibold">Per-screen breakdown</h2>
+        <p className="text-sm text-muted-foreground">Fulfillments by screen over the last {byScreen?.window_hours ?? 24}h.</p>
+      </div>
+
+      {byScreenError && (
+        <Alert variant="destructive">
+          <AlertDescription>
+            {byScreenError instanceof Error ? byScreenError.message : 'Failed to load per-screen usage'}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {byScreenLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : byScreen && byScreen.screens.length > 0 ? (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Screen</TableHead>
+              <TableHead className="text-right">Fulfillments</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {byScreen.screens
+              .slice()
+              .sort((a, b) => b.count - a.count)
+              .map((s) => (
+                <TableRow key={s.screen_id}>
+                  <TableCell className="font-medium">{s.label}</TableCell>
+                  <TableCell className="text-right">{s.count.toLocaleString()}</TableCell>
+                </TableRow>
+              ))}
+          </TableBody>
+        </Table>
+      ) : (
+        <p className="text-sm text-muted-foreground">No fulfillments in this window.</p>
+      )}
     </div>
   );
 }

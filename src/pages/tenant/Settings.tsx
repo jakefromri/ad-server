@@ -74,8 +74,15 @@ export default function Settings() {
       <Card className="max-w-md">
         <CardHeader>
           <CardTitle>API documentation</CardTitle>
-          <CardDescription>Coming soon — no build phase has generated the OpenAPI spec/docs page yet.</CardDescription>
+          <CardDescription>Full OpenAPI spec and interactive docs for the campaign/screen management endpoints.</CardDescription>
         </CardHeader>
+        <CardFooter>
+          <Button asChild variant="outline">
+            <a href={`${import.meta.env.VITE_API_BASE_URL as string}/docs`} target="_blank" rel="noreferrer">
+              Open API docs
+            </a>
+          </Button>
+        </CardFooter>
       </Card>
     </div>
   );

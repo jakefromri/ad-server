@@ -66,6 +66,25 @@ export function matchesScreenConfig(
   return true;
 }
 
+// Pure structural check (no `now`, unlike the matches* functions above) —
+// backs GET /v1/campaigns/:id/pacing's `no_eligible_screens` field
+// (architecture.md § API Endpoints, follow-up scoping session). "Does this
+// targeting's time window ever cover any nonzero span of a week" is a
+// different question from "does it match right now" — CAMPAIGN-UNIT-03's
+// flight/daypart validation should already reject a zero-width daypart at
+// creation, but this exists as defense-in-depth (PACING-INT-03) rather than
+// assuming validation always upstream-blocks it. String comparison of HH:MM
+// values is sufficient: equal strings is exactly the zero-width case, and
+// every other case (including an overnight wrap like 22:00–02:00) is a
+// nonzero span.
+export function hasNonZeroTimeCoverage(targeting: Pick<CampaignTargeting, 'daypart' | 'days_of_week'>): boolean {
+  if (targeting.days_of_week && targeting.days_of_week.length === 0) return false;
+  if (targeting.daypart && targeting.daypart.length > 0) {
+    return targeting.daypart.some(({ start, end }) => start !== end);
+  }
+  return true;
+}
+
 export function matchesTargeting(targeting: CampaignTargeting, screen: TargetingScreen, now: Date = new Date()): boolean {
   return (
     matchesDaypart(targeting.daypart, now) &&

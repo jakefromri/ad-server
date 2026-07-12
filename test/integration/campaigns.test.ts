@@ -1,7 +1,8 @@
-// CAMPAIGN-INT-01..07. test-plan.md § Integration Tests.
+// CAMPAIGN-INT-01..07, PACING-INT-01..04 (04i, follow-up scoping session).
+// test-plan.md § Integration Tests.
 
 import { describe, it, expect, afterAll } from 'vitest';
-import { createTenantFixture, createCampaign, jsonRequest, cleanupAll } from '../helpers';
+import { createTenantFixture, createCampaign, registerScreen, jsonRequest, cleanupAll } from '../helpers';
 
 describe('CAMPAIGN-INT', () => {
   afterAll(cleanupAll);
@@ -130,5 +131,61 @@ describe('CAMPAIGN-INT', () => {
     });
     expect(activate.status).toBe(409);
     expect(activate.body.code).toBe('SOV_OVERSOLD');
+  });
+});
+
+describe('PACING-INT', () => {
+  afterAll(cleanupAll);
+
+  it('PACING-INT-01: no_eligible_screens — true when targeting matches no registered screen', async () => {
+    const tenant = await createTenantFixture();
+    await registerScreen(tenant.tenantAdmin, { state: 'CA' });
+    const created = await createCampaign(tenant.tenantAdmin, { targeting: { geo: { type: 'state', values: ['NY'] } } });
+
+    const { status, body } = await jsonRequest(`/v1/campaigns/${created.body.campaign.id}/pacing`, { token: tenant.tenantAdmin.token });
+    expect(status).toBe(200);
+    expect(body.no_eligible_screens).toBe(true);
+  });
+
+  it('PACING-INT-02: no_eligible_screens — false once a matching screen exists', async () => {
+    const tenant = await createTenantFixture();
+    await registerScreen(tenant.tenantAdmin, { state: 'CA' });
+    const created = await createCampaign(tenant.tenantAdmin, { targeting: { geo: { type: 'state', values: ['NY'] } } });
+
+    const before = await jsonRequest(`/v1/campaigns/${created.body.campaign.id}/pacing`, { token: tenant.tenantAdmin.token });
+    expect(before.body.no_eligible_screens).toBe(true);
+
+    await registerScreen(tenant.tenantAdmin, { state: 'NY' });
+    const after = await jsonRequest(`/v1/campaigns/${created.body.campaign.id}/pacing`, { token: tenant.tenantAdmin.token });
+    expect(after.status).toBe(200);
+    expect(after.body.no_eligible_screens).toBe(false);
+  });
+
+  it('PACING-INT-03: no_eligible_screens — true for a daypart window with zero time coverage', async () => {
+    const tenant = await createTenantFixture();
+    await registerScreen(tenant.tenantAdmin);
+    const created = await createCampaign(tenant.tenantAdmin, {
+      targeting: { daypart: [{ start: '09:00', end: '09:00' }], geo: { type: 'all' } },
+    });
+    expect(created.status).toBe(201);
+
+    const { status, body } = await jsonRequest(`/v1/campaigns/${created.body.campaign.id}/pacing`, { token: tenant.tenantAdmin.token });
+    expect(status).toBe(200);
+    expect(body.no_eligible_screens).toBe(true);
+  });
+
+  it('PACING-INT-04: no_eligible_screens — inactive screens do not count as eligible', async () => {
+    const tenant = await createTenantFixture();
+    const screen = await registerScreen(tenant.tenantAdmin, { state: 'CA' });
+    await jsonRequest(`/v1/screens/${screen.body.screen.id}`, {
+      method: 'PATCH',
+      token: tenant.tenantAdmin.token,
+      json: { status: 'inactive' },
+    });
+    const created = await createCampaign(tenant.tenantAdmin, { targeting: { geo: { type: 'state', values: ['CA'] } } });
+
+    const { status, body } = await jsonRequest(`/v1/campaigns/${created.body.campaign.id}/pacing`, { token: tenant.tenantAdmin.token });
+    expect(status).toBe(200);
+    expect(body.no_eligible_screens).toBe(true);
   });
 });

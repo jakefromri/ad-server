@@ -1,15 +1,17 @@
 // GET/POST /v1/campaigns, PATCH /v1/campaigns/:id, GET /v1/campaigns/:id/pacing.
 // Mounted at /v1/campaigns behind tenantAccessMiddleware (JWT-or-tenant-key).
 
-import { Hono } from 'hono';
-import { z } from 'zod';
 import { ErrorCode } from '../types';
 import { supabaseAdmin } from './supabase';
 import { tenantAccessMiddleware } from './tenant-access';
 import { checkSovOverselling } from './sov';
+import { hasNonZeroTimeCoverage, matchesGeo, matchesScreenConfig, type TargetingScreen } from './targeting';
+import { newRouter, createRoute, z, errorResponses, type RouteContext } from './openapi';
 
-const router = new Hono();
+const router = newRouter();
 router.use('*', tenantAccessMiddleware);
+
+const campaignSchema = z.record(z.unknown());
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Must be HH:MM');
 
@@ -66,20 +68,48 @@ function validateObligationAndFlight(candidate: ObligationFlightCheck): string |
   return null;
 }
 
-router.get('/', async (c) => {
+const listRoute = createRoute({
+  method: 'get',
+  path: '/',
+  tags: ['Campaigns'],
+  summary: "List this tenant's campaigns",
+  responses: {
+    200: { description: 'Campaign list', content: { 'application/json': { schema: z.object({ campaigns: z.array(campaignSchema) }) } } },
+    ...errorResponses(401, 403),
+  },
+});
+
+// Handler param is `c: RouteContext`, here and in every other 04i-converted route —
+// @hono/zod-openapi's typed-response system requires every `c.json(...)`
+// call in a handler to structurally match one declared `responses` status
+// entry, verified via TS overload resolution across the whole function
+// body. That breaks down across handlers with several differently-shaped
+// success/error branches (a rough edge in the library's typing, not a
+// runtime concern — request validation and the actual response body are
+// unaffected either way; `c.req.valid(...)` still returns the right runtime
+// value, just untyped).
+router.openapi(listRoute, async (c: RouteContext) => {
   const auth = c.get('auth');
   const { data, error } = await supabaseAdmin.from('campaigns').select('*').eq('tenant_id', auth.tenant_id);
   if (error) return c.json({ error: error.message, code: ErrorCode.VALIDATION_ERROR }, 400);
   return c.json({ campaigns: data ?? [] });
 });
 
-router.post('/', async (c) => {
+const createRoute_ = createRoute({
+  method: 'post',
+  path: '/',
+  tags: ['Campaigns'],
+  summary: 'Create a campaign',
+  request: { body: { content: { 'application/json': { schema: createCampaignSchema } } } },
+  responses: {
+    201: { description: 'Campaign created', content: { 'application/json': { schema: z.object({ campaign: campaignSchema }) } } },
+    ...errorResponses(400, 401, 403, 409),
+  },
+});
+
+router.openapi(createRoute_, async (c: RouteContext) => {
   const auth = c.get('auth');
-  const parsed = createCampaignSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request', code: ErrorCode.VALIDATION_ERROR }, 400);
-  }
-  const body = parsed.data;
+  const body = c.req.valid('json');
 
   const validationError = validateObligationAndFlight(body);
   if (validationError) return c.json({ error: validationError, code: ErrorCode.VALIDATION_ERROR }, 400);
@@ -125,14 +155,22 @@ router.post('/', async (c) => {
   return c.json({ campaign: data }, 201);
 });
 
-router.patch('/:id', async (c) => {
+const patchRoute = createRoute({
+  method: 'patch',
+  path: '/{id}',
+  tags: ['Campaigns'],
+  summary: 'Edit a campaign',
+  request: { params: z.object({ id: z.string() }), body: { content: { 'application/json': { schema: patchCampaignSchema } } } },
+  responses: {
+    200: { description: 'Updated campaign', content: { 'application/json': { schema: z.object({ campaign: campaignSchema }) } } },
+    ...errorResponses(400, 401, 403, 404, 409),
+  },
+});
+
+router.openapi(patchRoute, async (c: RouteContext) => {
   const auth = c.get('auth');
-  const id = c.req.param('id');
-  const parsed = patchCampaignSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request', code: ErrorCode.VALIDATION_ERROR }, 400);
-  }
-  const patch = parsed.data;
+  const { id } = c.req.valid('param');
+  const patch = c.req.valid('json');
 
   const { data: existing, error: fetchError } = await supabaseAdmin
     .from('campaigns')
@@ -187,9 +225,34 @@ router.patch('/:id', async (c) => {
   return c.json({ campaign: data });
 });
 
-router.get('/:id/pacing', async (c) => {
+const pacingRoute = createRoute({
+  method: 'get',
+  path: '/{id}/pacing',
+  tags: ['Campaigns'],
+  summary: 'Delivered/remaining vs. obligation, SOV actual-vs-target, and eligibility warnings',
+  request: { params: z.object({ id: z.string() }) },
+  responses: {
+    200: {
+      description: 'Pacing snapshot',
+      content: {
+        'application/json': {
+          schema: z.object({
+            delivered: z.number(),
+            remaining: z.number().nullable(),
+            sov_actual: z.number().nullable(),
+            sov_target: z.number().nullable(),
+            no_eligible_screens: z.boolean(),
+          }),
+        },
+      },
+    },
+    ...errorResponses(401, 403, 404),
+  },
+});
+
+router.openapi(pacingRoute, async (c: RouteContext) => {
   const auth = c.get('auth');
-  const id = c.req.param('id');
+  const { id } = c.req.valid('param');
 
   const { data: campaign, error } = await supabaseAdmin
     .from('campaigns')
@@ -240,7 +303,27 @@ router.get('/:id/pacing', async (c) => {
     sovActual = poolDelivered > 0 ? (delivered / poolDelivered) * 100 : 0;
   }
 
-  return c.json({ delivered, remaining, sov_actual: sovActual, sov_target: sovTarget });
+  // no_eligible_screens (04i, follow-up scoping session) — a live,
+  // request-time structural check, not tracked on the fulfillment hot path
+  // at all (architecture.md's resolved design: the original "zero real
+  // fulfillment requests" framing would have needed a hot-path write per
+  // eligible campaign per request; this is one extra query on an
+  // already-low-traffic dashboard read endpoint instead). true if the
+  // targeting's time window never has nonzero coverage, or no *active*
+  // screen in the tenant's current fleet matches its geo/screen-config.
+  const { data: activeScreens } = await supabaseAdmin
+    .from('screens')
+    .select('state, zip, aspect_ratio, resolution, orientation')
+    .eq('tenant_id', auth.tenant_id)
+    .eq('status', 'active');
+
+  const hasTimeCoverage = hasNonZeroTimeCoverage(campaign.targeting);
+  const hasMatchingScreen = (activeScreens ?? []).some((screen: TargetingScreen) =>
+    matchesGeo(campaign.targeting.geo, screen) && matchesScreenConfig(campaign.targeting.screen, screen)
+  );
+  const noEligibleScreens = !(hasTimeCoverage && hasMatchingScreen);
+
+  return c.json({ delivered, remaining, sov_actual: sovActual, sov_target: sovTarget, no_eligible_screens: noEligibleScreens });
 });
 
 export default router;

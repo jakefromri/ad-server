@@ -1,17 +1,30 @@
-// GET/POST /api/admin/tenants, PATCH /api/admin/tenants/:id. Mounted at
-// /api/admin/tenants behind humanAuthMiddleware + requireRole('superadmin').
+// GET/POST /api/admin/tenants, PATCH /api/admin/tenants/:id,
+// GET /api/admin/tenants/:id, POST /api/admin/tenants/:id/reinvite. Mounted
+// at /api/admin/tenants behind humanAuthMiddleware + requireRole('superadmin').
 
-import { Hono } from 'hono';
-import { z } from 'zod';
 import { ErrorCode } from '../types';
 import { supabaseAdmin } from './supabase';
 import { generateApiKey, hashApiKey } from './hash';
 import { humanAuthMiddleware, requireRole } from './human-auth';
+import { newRouter, createRoute, z, errorResponses, type RouteContext } from './openapi';
 
-const router = new Hono();
+const router = newRouter();
 router.use('*', humanAuthMiddleware, requireRole('superadmin'));
 
-router.get('/', async (c) => {
+const tenantSchema = z.record(z.unknown());
+
+const listRoute = createRoute({
+  method: 'get',
+  path: '/',
+  tags: ['Admin — Tenants'],
+  summary: 'List all tenants with quota usage and campaign/screen counts',
+  responses: {
+    200: { description: 'Tenant list', content: { 'application/json': { schema: z.object({ tenants: z.array(tenantSchema) }) } } },
+    ...errorResponses(401, 403),
+  },
+});
+
+router.openapi(listRoute, async (c: RouteContext) => {
   const { data: tenants, error } = await supabaseAdmin.from('tenants').select('*');
   if (error) return c.json({ error: error.message, code: ErrorCode.VALIDATION_ERROR }, 400);
 
@@ -53,13 +66,67 @@ function generateInviteToken(): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-router.post('/', async (c) => {
+function buildInviteUrl(token: string): string {
+  // Ported from ComposableAuth's invite-URL pattern (hello-world/apps/api/src/routes/admin.ts).
+  return `${process.env.APP_URL ?? 'http://localhost:5173'}/invite?token=${token}`;
+}
+
+// Shared by POST '/' (first invite, atomic with tenant creation) and POST
+// '/:id/reinvite' (04i, follow-up scoping session) — architecture.md's
+// reinvite design explicitly says to extract this rather than duplicate it.
+async function createTenantAdminInvite(params: { tenantId: string; email: string; createdBy: string }) {
+  const token = generateInviteToken();
+  const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+
+  return supabaseAdmin
+    .from('invites')
+    .insert({
+      tenant_id: params.tenantId,
+      email: params.email,
+      role: 'tenant_admin',
+      token,
+      expires_at: expiresAt,
+      created_by: params.createdBy,
+    })
+    .select()
+    .single();
+}
+
+const createRoute_ = createRoute({
+  method: 'post',
+  path: '/',
+  tags: ['Admin — Tenants'],
+  summary: 'Create a tenant, its first tenant API key, and its first tenant_admin invite (atomic)',
+  request: { body: { content: { 'application/json': { schema: createTenantSchema } } } },
+  responses: {
+    201: {
+      description: 'Tenant created',
+      content: {
+        'application/json': {
+          schema: z.object({
+            tenant: tenantSchema,
+            invite: z.object({ invite_url: z.string(), expires_at: z.string() }),
+            api_key: z.string(),
+          }),
+        },
+      },
+    },
+    ...errorResponses(400, 401, 403),
+  },
+});
+
+// Handler param is `c: RouteContext`, here and in every other 04i-converted route —
+// @hono/zod-openapi's typed-response system requires every `c.json(...)`
+// call in a handler to structurally match one declared `responses` status
+// entry, verified via TS overload resolution across the whole function
+// body. That breaks down across handlers with several differently-shaped
+// success/error branches (a rough edge in the library's typing, not a
+// runtime concern — request validation and the actual response body are
+// unaffected either way; `c.req.valid(...)` still returns the right runtime
+// value, just untyped).
+router.openapi(createRoute_, async (c: RouteContext) => {
   const auth = c.get('auth');
-  const parsed = createTenantSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request', code: ErrorCode.VALIDATION_ERROR }, 400);
-  }
-  const body = parsed.data;
+  const body = c.req.valid('json');
 
   // Tenant + tenant_api_keys row + first tenant_admin invite, atomic in
   // intent (architecture.md § Auth Model: "invite failure rolls back the
@@ -90,34 +157,21 @@ router.post('/', async (c) => {
     return c.json({ error: 'Failed to provision tenant API key', code: ErrorCode.VALIDATION_ERROR }, 400);
   }
 
-  const token = generateInviteToken();
-  const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
-
-  const { data: invite, error: inviteError } = await supabaseAdmin
-    .from('invites')
-    .insert({
-      tenant_id: tenant.id,
-      email: body.admin_email,
-      role: 'tenant_admin',
-      token,
-      expires_at: expiresAt,
-      created_by: auth.user_id,
-    })
-    .select()
-    .single();
+  const { data: invite, error: inviteError } = await createTenantAdminInvite({
+    tenantId: tenant.id,
+    email: body.admin_email,
+    createdBy: auth.user_id as string,
+  });
 
   if (inviteError || !invite) {
     await supabaseAdmin.from('tenants').delete().eq('id', tenant.id);
     return c.json({ error: 'Failed to create tenant invite', code: ErrorCode.VALIDATION_ERROR }, 400);
   }
 
-  // Ported from ComposableAuth's invite-URL pattern (hello-world/apps/api/src/routes/admin.ts).
-  const inviteUrl = `${process.env.APP_URL ?? 'http://localhost:5173'}/invite?token=${token}`;
-
   return c.json(
     {
       tenant,
-      invite: { invite_url: inviteUrl, expires_at: invite.expires_at },
+      invite: { invite_url: buildInviteUrl(invite.token), expires_at: invite.expires_at },
       api_key: plaintextKey,
     },
     201
@@ -132,13 +186,27 @@ const patchTenantSchema = z
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'At least one field is required' });
 
-router.patch('/:id', async (c) => {
-  const id = c.req.param('id');
-  const parsed = patchTenantSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request', code: ErrorCode.VALIDATION_ERROR }, 400);
-  }
-  const patch = parsed.data;
+const patchRoute = createRoute({
+  method: 'patch',
+  path: '/{id}',
+  tags: ['Admin — Tenants'],
+  summary: 'Update a tenant (status, quota, reservation timeout)',
+  request: {
+    params: z.object({ id: z.string() }),
+    body: { content: { 'application/json': { schema: patchTenantSchema } } },
+  },
+  responses: {
+    200: {
+      description: 'Updated tenant (includes in_flight_reservations if deactivating)',
+      content: { 'application/json': { schema: z.object({ tenant: tenantSchema, in_flight_reservations: z.number().optional() }) } },
+    },
+    ...errorResponses(400, 401, 403, 404),
+  },
+});
+
+router.openapi(patchRoute, async (c: RouteContext) => {
+  const { id } = c.req.valid('param');
+  const patch = c.req.valid('json');
 
   const { data: tenant, error } = await supabaseAdmin.from('tenants').update(patch).eq('id', id).select().single();
 
@@ -162,6 +230,121 @@ router.patch('/:id', async (c) => {
   }
 
   return c.json({ tenant });
+});
+
+// GET /api/admin/tenants/:id (04i, follow-up scoping session) — one combined
+// fetch of tenant + campaigns + screens rather than three round trips, since
+// a superadmin JWT gets 403 on GET /v1/campaigns / GET /v1/screens directly
+// (tenantAccessMiddleware only accepts tenant_admin-role JWTs). This route
+// bypasses that restriction deliberately, scoped to this one superadmin-only
+// endpoint — architecture.md explicitly says not to loosen
+// tenantAccessMiddleware itself for this.
+const detailRoute = createRoute({
+  method: 'get',
+  path: '/{id}',
+  tags: ['Admin — Tenants'],
+  summary: 'Tenant detail — tenant + all campaigns + all screens',
+  request: { params: z.object({ id: z.string() }) },
+  responses: {
+    200: {
+      description: 'Tenant, campaigns, screens',
+      content: {
+        'application/json': { schema: z.object({ tenant: tenantSchema, campaigns: z.array(tenantSchema), screens: z.array(tenantSchema) }) },
+      },
+    },
+    ...errorResponses(401, 403, 404),
+  },
+});
+
+router.openapi(detailRoute, async (c: RouteContext) => {
+  const { id } = c.req.valid('param');
+
+  const { data: tenant, error } = await supabaseAdmin.from('tenants').select('*').eq('id', id).single();
+  if (error || !tenant) {
+    return c.json({ error: 'Tenant not found', code: ErrorCode.NOT_FOUND }, 404);
+  }
+
+  const [{ data: campaigns }, { data: screens }] = await Promise.all([
+    supabaseAdmin.from('campaigns').select('*').eq('tenant_id', id),
+    supabaseAdmin.from('screens').select('*').eq('tenant_id', id),
+  ]);
+
+  return c.json({ tenant, campaigns: campaigns ?? [], screens: screens ?? [] });
+});
+
+// POST /api/admin/tenants/:id/reinvite (04i, follow-up scoping session) —
+// closes the gap flagged since 04c/04d: scope.md already lists this as MVP
+// superadmin capability, no endpoint shape existed before this phase.
+const reinviteRoute = createRoute({
+  method: 'post',
+  path: '/{id}/reinvite',
+  tags: ['Admin — Tenants'],
+  summary: 'Re-send a tenant_admin invite for a tenant with no accepted admin yet',
+  request: { params: z.object({ id: z.string() }) },
+  responses: {
+    200: {
+      description: 'New invite issued',
+      content: { 'application/json': { schema: z.object({ invite: z.object({ invite_url: z.string(), expires_at: z.string() }) }) } },
+    },
+    ...errorResponses(400, 401, 403, 404),
+  },
+});
+
+router.openapi(reinviteRoute, async (c: RouteContext) => {
+  const auth = c.get('auth');
+  const { id } = c.req.valid('param');
+
+  const { data: tenant, error: tenantError } = await supabaseAdmin.from('tenants').select('id').eq('id', id).single();
+  if (tenantError || !tenant) {
+    return c.json({ error: 'Tenant not found', code: ErrorCode.NOT_FOUND }, 404);
+  }
+
+  // Only valid when the tenant has no accepted tenant_admin yet — covers both
+  // an expired/unused invite and no invite ever having been accepted.
+  const { data: adminMembership } = await supabaseAdmin
+    .from('memberships')
+    .select('id')
+    .eq('tenant_id', id)
+    .eq('role', 'tenant_admin')
+    .maybeSingle();
+
+  if (adminMembership) {
+    return c.json({ error: 'Tenant already has an accepted tenant_admin', code: ErrorCode.TENANT_ALREADY_HAS_ADMIN }, 400);
+  }
+
+  // Grab the target email off the most recent unaccepted invite before
+  // invalidating it — POST '/' always creates one atomically with the
+  // tenant, so there's always at least one to read from here.
+  const { data: priorInvite } = await supabaseAdmin
+    .from('invites')
+    .select('email')
+    .eq('tenant_id', id)
+    .is('accepted_at', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!priorInvite) {
+    return c.json({ error: 'No pending invite found for this tenant', code: ErrorCode.NOT_FOUND }, 404);
+  }
+
+  // Invalidate every prior unaccepted invite — architecture.md: "mark
+  // status = 'superseded' or delete, either is safe since an unaccepted
+  // invite has no dependent state." invites has no status column (0001
+  // schema), so delete is the simpler of the two safe options.
+  await supabaseAdmin.from('invites').delete().eq('tenant_id', id).is('accepted_at', null);
+
+  const { data: invite, error: inviteError } = await createTenantAdminInvite({
+    tenantId: id,
+    email: priorInvite.email,
+    createdBy: auth.user_id as string,
+  });
+
+  if (inviteError || !invite) {
+    return c.json({ error: 'Failed to create invite', code: ErrorCode.VALIDATION_ERROR }, 400);
+  }
+
+  return c.json({ invite: { invite_url: buildInviteUrl(invite.token), expires_at: invite.expires_at } });
 });
 
 export default router;

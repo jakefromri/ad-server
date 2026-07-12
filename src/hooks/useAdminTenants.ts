@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
-import type { CreateTenantResponse, PatchTenantResponse, TenantSummary } from '@/lib/api-types';
+import type { CreateTenantResponse, PatchTenantResponse, ReinviteResponse, TenantDetailResponse, TenantSummary } from '@/lib/api-types';
 
 export function useAdminTenants() {
   return useQuery({
@@ -35,6 +35,28 @@ export function usePatchTenant(id: string) {
   return useMutation({
     mutationFn: (body: PatchTenantInput) =>
       apiFetch<PatchTenantResponse>(`/api/admin/tenants/${id}`, { method: 'PATCH', body }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-tenants'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-tenants'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-tenant-detail', id] });
+    },
+  });
+}
+
+// GET /api/admin/tenants/:id (04i, follow-up scoping session) — replaces the
+// 04f list-cache workaround (TenantDetail.tsx used to derive the tenant from
+// useAdminTenants()'s cache and had no campaigns/screens sub-views at all,
+// since no endpoint granted a superadmin JWT access to an arbitrary tenant's
+// campaigns/screens).
+export function useAdminTenantDetail(id: string | undefined) {
+  return useQuery({
+    queryKey: ['admin-tenant-detail', id],
+    queryFn: () => apiFetch<TenantDetailResponse>(`/api/admin/tenants/${id}`),
+    enabled: !!id,
+  });
+}
+
+export function useReinviteTenant(id: string) {
+  return useMutation({
+    mutationFn: () => apiFetch<ReinviteResponse>(`/api/admin/tenants/${id}/reinvite`, { method: 'POST' }),
   });
 }
