@@ -1,5 +1,4 @@
-import { OpenAPIHono } from '@hono/zod-openapi';
-import type { ExecutionContext } from 'hono';
+import { Hono, type ExecutionContext } from 'hono';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 import invites from '../server/invites';
@@ -11,17 +10,10 @@ import campaigns from '../server/campaigns';
 import screens from '../server/screens';
 import fulfillments from '../server/fulfillments';
 import cron from '../server/cron';
-import { mountDocs } from '../server/docs';
 
 export const config = { runtime: 'edge' };
 
-// OpenAPIHono, not plain Hono, since 04i (docs.ts) — every route file in
-// server/ is itself an OpenAPIHono router; mounting them here via
-// `app.route()` merges each one's OpenAPI registry into this top-level app's
-// (see @hono/zod-openapi's `route()` override), which is what
-// GET /v1/openapi.json / GET /docs (mounted last, via mountDocs) actually
-// render.
-const app = new OpenAPIHono();
+const app = new Hono();
 
 app.use(
   '*',
@@ -63,13 +55,20 @@ app.route('/v1/fulfillments', fulfillments);
 // CRON_SECRET gate.
 app.route('/api/cron', cron);
 
-// GET /v1/openapi.json, GET /docs (04i) — mounted last so every route above
-// is already merged into `app`'s OpenAPI registry by the time a request for
-// either of these actually renders the spec (though `.doc()` reads the
-// registry lazily per-request, so the order here isn't itself load-bearing —
-// see docs.ts's header comment for why this can't be a routed sub-app).
-mountDocs(app);
-
+// docs.ts / GET /v1/openapi.json / GET /docs — attempted in 04i via
+// @hono/zod-openapi, reverted in the same phase: that package internally
+// imports hono's `mergePath` via the cross-package subpath `hono/utils/url`,
+// which Vercel's Edge Function deploy-time validator rejects outright
+// ("referencing unsupported modules"), confirmed with a real
+// `vercel deploy --prebuilt`. Every version of @hono/zod-openapi has this
+// same import (core to how `.route()` merges sub-router registries), so it
+// isn't fixable by bumping versions, and switching this function to Node.js
+// runtime to sidestep the Edge-only restriction surfaced a second blocking
+// issue (this repo's `"type": "module"` + Vercel's unbundled Node Function
+// packaging needs explicit `.js` extensions on every relative import — a
+// much bigger, riskier change). Not attempted again without a clearer path
+// around one of those two problems — see build-report.md's 04i section for
+// the full investigation.
 app.onError((err, c) => {
   if (err instanceof HTTPException) {
     // Every auth middleware (human-auth/device-auth/tenant-access) throws

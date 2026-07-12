@@ -3,16 +3,15 @@
 // same dual-auth chain as campaigns, since the "API docs" external-script use
 // case (and the k6 simulator, 04e) registers screens via a tenant API key.
 
+import { Hono } from 'hono';
+import { z } from 'zod';
 import { ErrorCode } from '../types';
 import { supabaseAdmin } from './supabase';
 import { generateApiKey, hashApiKey } from './hash';
 import { tenantAccessMiddleware } from './tenant-access';
-import { newRouter, createRoute, z, errorResponses, type RouteContext } from './openapi';
 
-const router = newRouter();
+const router = new Hono();
 router.use('*', tenantAccessMiddleware);
-
-const screenSchema = z.record(z.unknown());
 
 const screenBaseSchema = z.object({
   label: z.string().min(1),
@@ -38,27 +37,7 @@ const patchScreenSchema = screenBaseSchema
     status: z.enum(['active', 'inactive']).optional(),
   });
 
-const listRoute = createRoute({
-  method: 'get',
-  path: '/',
-  tags: ['Screens'],
-  summary: 'List this tenant\'s screens',
-  responses: {
-    200: { description: 'Screen list', content: { 'application/json': { schema: z.object({ screens: z.array(screenSchema) }) } } },
-    ...errorResponses(401, 403),
-  },
-});
-
-// Handler param is `c: RouteContext`, here and in every other 04i-converted route —
-// @hono/zod-openapi's typed-response system requires every `c.json(...)`
-// call in a handler to structurally match one declared `responses` status
-// entry, verified via TS overload resolution across the whole function
-// body. That breaks down across handlers with several differently-shaped
-// success/error branches (a rough edge in the library's typing, not a
-// runtime concern — request validation and the actual response body are
-// unaffected either way; `c.req.valid(...)` still returns the right runtime
-// value, just untyped).
-router.openapi(listRoute, async (c: RouteContext) => {
+router.get('/', async (c) => {
   const auth = c.get('auth');
   const { data: screens, error } = await supabaseAdmin.from('screens').select('*').eq('tenant_id', auth.tenant_id);
   if (error) return c.json({ error: error.message, code: ErrorCode.VALIDATION_ERROR }, 400);
@@ -84,24 +63,13 @@ router.openapi(listRoute, async (c: RouteContext) => {
   return c.json({ screens: result });
 });
 
-const createRoute_ = createRoute({
-  method: 'post',
-  path: '/',
-  tags: ['Screens'],
-  summary: 'Register a screen (issues a device API key)',
-  request: { body: { content: { 'application/json': { schema: screenBaseSchema } } } },
-  responses: {
-    201: {
-      description: 'Screen registered',
-      content: { 'application/json': { schema: z.object({ screen: screenSchema, device_api_key: z.string() }) } },
-    },
-    ...errorResponses(400, 401, 403),
-  },
-});
-
-router.openapi(createRoute_, async (c: RouteContext) => {
+router.post('/', async (c) => {
   const auth = c.get('auth');
-  const body = c.req.valid('json');
+  const parsed = screenBaseSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request', code: ErrorCode.VALIDATION_ERROR }, 400);
+  }
+  const body = parsed.data;
 
   const { data: screen, error } = await supabaseAdmin
     .from('screens')
@@ -142,26 +110,17 @@ router.openapi(createRoute_, async (c: RouteContext) => {
   return c.json({ screen, device_api_key: plaintextKey }, 201);
 });
 
-const patchRoute = createRoute({
-  method: 'patch',
-  path: '/{id}',
-  tags: ['Screens'],
-  summary: 'Edit a screen',
-  request: { params: z.object({ id: z.string() }), body: { content: { 'application/json': { schema: patchScreenSchema } } } },
-  responses: {
-    200: { description: 'Updated screen', content: { 'application/json': { schema: z.object({ screen: screenSchema }) } } },
-    ...errorResponses(400, 401, 403, 404),
-  },
-});
-
-router.openapi(patchRoute, async (c: RouteContext) => {
+router.patch('/:id', async (c) => {
   const auth = c.get('auth');
-  const { id } = c.req.valid('param');
-  const patch = c.req.valid('json');
+  const id = c.req.param('id');
+  const parsed = patchScreenSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request', code: ErrorCode.VALIDATION_ERROR }, 400);
+  }
 
   const { data, error } = await supabaseAdmin
     .from('screens')
-    .update(patch)
+    .update(parsed.data)
     .eq('id', id)
     .eq('tenant_id', auth.tenant_id)
     .select()
@@ -174,21 +133,9 @@ router.openapi(patchRoute, async (c: RouteContext) => {
   return c.json({ screen: data });
 });
 
-const rotateKeyRoute = createRoute({
-  method: 'post',
-  path: '/{id}/rotate-key',
-  tags: ['Screens'],
-  summary: 'Revoke the current device API key and issue a new one',
-  request: { params: z.object({ id: z.string() }) },
-  responses: {
-    200: { description: 'New device API key', content: { 'application/json': { schema: z.object({ device_api_key: z.string() }) } } },
-    ...errorResponses(401, 403, 404),
-  },
-});
-
-router.openapi(rotateKeyRoute, async (c: RouteContext) => {
+router.post('/:id/rotate-key', async (c) => {
   const auth = c.get('auth');
-  const { id } = c.req.valid('param');
+  const id = c.req.param('id');
 
   const { data: screen, error: screenError } = await supabaseAdmin
     .from('screens')

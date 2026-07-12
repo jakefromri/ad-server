@@ -1,6 +1,8 @@
-// ADMIN-INT-03, ADMIN-INT-06..09, USAGE-INT-01..03, FULFILL-ATTEMPT-INT-01,
-// DOCS-INT-01 (both entries) — 04i, follow-up scoping session.
-// test-plan.md § Integration Tests.
+// ADMIN-INT-03, ADMIN-INT-06..09, USAGE-INT-01..03, FULFILL-ATTEMPT-INT-01
+// — 04i, follow-up scoping session. test-plan.md § Integration Tests.
+// (docs.ts/OpenAPI — OPENAPI-UNIT-01, both DOCS-INT-01 entries — was
+// attempted and reverted in this same phase; see build-report.md's 04i
+// section and api/index.ts's header comment for why.)
 
 import { describe, it, expect, afterAll } from 'vitest';
 import {
@@ -9,7 +11,6 @@ import {
   createCampaign,
   registerScreen,
   jsonRequest,
-  apiRequest,
   cleanupAll,
   supabaseAdmin,
   trackUser,
@@ -217,53 +218,5 @@ describe('ADMIN-INT-03: system health endpoint', () => {
     expect(typeof health.error_rate).toBe('number');
     expect(typeof health.reservation_timeout_rate).toBe('number');
     expect(typeof health.no_eligible_campaign_rate).toBe('number');
-  });
-});
-
-describe('DOCS-INT-01', () => {
-  it('docs endpoints are public and reachable', async () => {
-    const specRes = await apiRequest('/v1/openapi.json');
-    expect(specRes.status).toBe(200);
-    const spec = await specRes.json();
-    expect(spec.paths).toBeTruthy();
-    expect(Object.keys(spec.paths).length).toBeGreaterThan(0);
-
-    const docsRes = await apiRequest('/docs');
-    expect(docsRes.status).toBe(200);
-    const html = await docsRes.text();
-    expect(html).toContain('/v1/openapi.json');
-  });
-
-  it('OpenAPI spec is valid and covers every documented endpoint from architecture.md', async () => {
-    const res = await apiRequest('/v1/openapi.json');
-    const spec = await res.json();
-
-    expect(spec.openapi).toMatch(/^3\./);
-    expect(spec.info?.title).toBeTruthy();
-    expect(spec.info?.version).toBeTruthy();
-
-    const expectedPaths = [
-      '/api/admin/tenants',
-      '/api/admin/tenants/{id}',
-      '/api/admin/tenants/{id}/reinvite',
-      '/api/admin/system-health',
-      '/api/admin/ledger',
-      '/api/invites/accept',
-      '/v1/campaigns',
-      '/v1/campaigns/{id}',
-      '/v1/campaigns/{id}/pacing',
-      '/v1/screens',
-      '/v1/screens/{id}',
-      '/v1/screens/{id}/rotate-key',
-      '/v1/tenant/api-key',
-      '/v1/tenant/api-key/rotate',
-      '/v1/tenant/usage',
-      '/v1/tenant/usage/by-screen',
-      '/v1/fulfillments',
-      '/v1/fulfillments/{id}/report',
-    ];
-    for (const path of expectedPaths) {
-      expect(spec.paths[path], `missing path ${path}`).toBeTruthy();
-    }
   });
 });

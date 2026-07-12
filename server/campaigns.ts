@@ -1,17 +1,16 @@
 // GET/POST /v1/campaigns, PATCH /v1/campaigns/:id, GET /v1/campaigns/:id/pacing.
 // Mounted at /v1/campaigns behind tenantAccessMiddleware (JWT-or-tenant-key).
 
+import { Hono } from 'hono';
+import { z } from 'zod';
 import { ErrorCode } from '../types';
 import { supabaseAdmin } from './supabase';
 import { tenantAccessMiddleware } from './tenant-access';
 import { checkSovOverselling } from './sov';
 import { hasNonZeroTimeCoverage, matchesGeo, matchesScreenConfig, type TargetingScreen } from './targeting';
-import { newRouter, createRoute, z, errorResponses, type RouteContext } from './openapi';
 
-const router = newRouter();
+const router = new Hono();
 router.use('*', tenantAccessMiddleware);
-
-const campaignSchema = z.record(z.unknown());
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Must be HH:MM');
 
@@ -68,48 +67,20 @@ function validateObligationAndFlight(candidate: ObligationFlightCheck): string |
   return null;
 }
 
-const listRoute = createRoute({
-  method: 'get',
-  path: '/',
-  tags: ['Campaigns'],
-  summary: "List this tenant's campaigns",
-  responses: {
-    200: { description: 'Campaign list', content: { 'application/json': { schema: z.object({ campaigns: z.array(campaignSchema) }) } } },
-    ...errorResponses(401, 403),
-  },
-});
-
-// Handler param is `c: RouteContext`, here and in every other 04i-converted route —
-// @hono/zod-openapi's typed-response system requires every `c.json(...)`
-// call in a handler to structurally match one declared `responses` status
-// entry, verified via TS overload resolution across the whole function
-// body. That breaks down across handlers with several differently-shaped
-// success/error branches (a rough edge in the library's typing, not a
-// runtime concern — request validation and the actual response body are
-// unaffected either way; `c.req.valid(...)` still returns the right runtime
-// value, just untyped).
-router.openapi(listRoute, async (c: RouteContext) => {
+router.get('/', async (c) => {
   const auth = c.get('auth');
   const { data, error } = await supabaseAdmin.from('campaigns').select('*').eq('tenant_id', auth.tenant_id);
   if (error) return c.json({ error: error.message, code: ErrorCode.VALIDATION_ERROR }, 400);
   return c.json({ campaigns: data ?? [] });
 });
 
-const createRoute_ = createRoute({
-  method: 'post',
-  path: '/',
-  tags: ['Campaigns'],
-  summary: 'Create a campaign',
-  request: { body: { content: { 'application/json': { schema: createCampaignSchema } } } },
-  responses: {
-    201: { description: 'Campaign created', content: { 'application/json': { schema: z.object({ campaign: campaignSchema }) } } },
-    ...errorResponses(400, 401, 403, 409),
-  },
-});
-
-router.openapi(createRoute_, async (c: RouteContext) => {
+router.post('/', async (c) => {
   const auth = c.get('auth');
-  const body = c.req.valid('json');
+  const parsed = createCampaignSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request', code: ErrorCode.VALIDATION_ERROR }, 400);
+  }
+  const body = parsed.data;
 
   const validationError = validateObligationAndFlight(body);
   if (validationError) return c.json({ error: validationError, code: ErrorCode.VALIDATION_ERROR }, 400);
@@ -155,22 +126,14 @@ router.openapi(createRoute_, async (c: RouteContext) => {
   return c.json({ campaign: data }, 201);
 });
 
-const patchRoute = createRoute({
-  method: 'patch',
-  path: '/{id}',
-  tags: ['Campaigns'],
-  summary: 'Edit a campaign',
-  request: { params: z.object({ id: z.string() }), body: { content: { 'application/json': { schema: patchCampaignSchema } } } },
-  responses: {
-    200: { description: 'Updated campaign', content: { 'application/json': { schema: z.object({ campaign: campaignSchema }) } } },
-    ...errorResponses(400, 401, 403, 404, 409),
-  },
-});
-
-router.openapi(patchRoute, async (c: RouteContext) => {
+router.patch('/:id', async (c) => {
   const auth = c.get('auth');
-  const { id } = c.req.valid('param');
-  const patch = c.req.valid('json');
+  const id = c.req.param('id');
+  const parsed = patchCampaignSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request', code: ErrorCode.VALIDATION_ERROR }, 400);
+  }
+  const patch = parsed.data;
 
   const { data: existing, error: fetchError } = await supabaseAdmin
     .from('campaigns')
@@ -225,34 +188,9 @@ router.openapi(patchRoute, async (c: RouteContext) => {
   return c.json({ campaign: data });
 });
 
-const pacingRoute = createRoute({
-  method: 'get',
-  path: '/{id}/pacing',
-  tags: ['Campaigns'],
-  summary: 'Delivered/remaining vs. obligation, SOV actual-vs-target, and eligibility warnings',
-  request: { params: z.object({ id: z.string() }) },
-  responses: {
-    200: {
-      description: 'Pacing snapshot',
-      content: {
-        'application/json': {
-          schema: z.object({
-            delivered: z.number(),
-            remaining: z.number().nullable(),
-            sov_actual: z.number().nullable(),
-            sov_target: z.number().nullable(),
-            no_eligible_screens: z.boolean(),
-          }),
-        },
-      },
-    },
-    ...errorResponses(401, 403, 404),
-  },
-});
-
-router.openapi(pacingRoute, async (c: RouteContext) => {
+router.get('/:id/pacing', async (c) => {
   const auth = c.get('auth');
-  const { id } = c.req.valid('param');
+  const id = c.req.param('id');
 
   const { data: campaign, error } = await supabaseAdmin
     .from('campaigns')

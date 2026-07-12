@@ -11,15 +11,16 @@
 // header comment for why that step can't be plain sequential supabase-js
 // calls).
 
+import { Hono } from 'hono';
+import { z } from 'zod';
 import { ErrorCode, type CampaignTargeting } from '../types';
 import { supabaseAdmin } from './supabase';
 import { deviceAuthMiddleware } from './device-auth';
 import { filterEligibleCampaigns, scoreEligiblePool, type CampaignForEligibility } from './reconciliation';
 import { logFulfillmentAttempt } from './fulfillment-attempts';
 import type { TargetingScreen } from './targeting';
-import { newRouter, createRoute, z, errorResponses, type RouteContext } from './openapi';
 
-const router = newRouter();
+const router = new Hono();
 
 // deviceAuthMiddleware is NOT mounted via a blanket `router.use('*', ...)`
 // here (unlike every other router in server/) — POST '/' needs to catch its
@@ -158,42 +159,7 @@ async function attemptReservation(params: {
   return row;
 }
 
-const requestFulfillmentRoute = createRoute({
-  method: 'post',
-  path: '/',
-  tags: ['Fulfillments'],
-  summary: 'Request a fulfillment for the calling device\'s screen',
-  responses: {
-    201: {
-      description: 'Reserved',
-      content: {
-        'application/json': {
-          schema: z.object({
-            fulfillment_id: z.string(),
-            campaign_id: z.string(),
-            media_ref: z.string(),
-            reserved_expires_at: z.string(),
-          }),
-        },
-      },
-    },
-    200: {
-      description: 'No eligible campaign',
-      content: { 'application/json': { schema: z.object({ fulfilled: z.literal(false), reason: z.literal('no_eligible_campaigns') }) } },
-    },
-    ...errorResponses(401, 403, 429),
-  },
-});
-
-// Handler param is `c: RouteContext`, here and in every other 04i-converted route —
-// @hono/zod-openapi's typed-response system requires every `c.json(...)`
-// call in a handler to structurally match one declared `responses` status
-// entry, verified via TS overload resolution across the whole function
-// body. That breaks down across handlers with several differently-shaped
-// success/error branches (a rough edge in the library's typing, not a
-// runtime concern — request validation and the actual response body are
-// unaffected either way).
-router.openapi(requestFulfillmentRoute, async (c: RouteContext) => {
+router.post('/', async (c) => {
   // Manually invoked (not `router.use`) so a thrown auth failure can be
   // logged with a fulfillment_attempts row before propagating — see this
   // file's header comment on why '/' doesn't share '/:id/report''s plain
@@ -321,25 +287,15 @@ const reportSchema = z.object({
   played_duration_ms: z.number().int().nonnegative().optional(),
 });
 
-const reportRoute = createRoute({
-  method: 'post',
-  path: '/{id}/report',
-  tags: ['Fulfillments'],
-  summary: 'Report the outcome of a reserved fulfillment',
-  request: {
-    params: z.object({ id: z.string() }),
-    body: { content: { 'application/json': { schema: reportSchema } } },
-  },
-  responses: {
-    200: { description: 'Reported', content: { 'application/json': { schema: z.object({ status: z.enum(['confirmed', 'released']) }) } } },
-    ...errorResponses(400, 401, 403, 404, 409),
-  },
-});
-
-router.openapi(reportRoute, async (c: RouteContext) => {
+router.post('/:id/report', async (c) => {
   const device = c.get('device');
-  const { id } = c.req.valid('param');
-  const { outcome, played_duration_ms } = c.req.valid('json');
+  const id = c.req.param('id');
+
+  const parsed = reportSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request', code: ErrorCode.VALIDATION_ERROR }, 400);
+  }
+  const { outcome, played_duration_ms } = parsed.data;
 
   const { data: fulfillment, error: fetchError } = await supabaseAdmin
     .from('fulfillments')
