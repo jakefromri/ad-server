@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ad-server live simulator</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #151821;
+    --panel-2: #1c202c;
+    --border: #2a2f3d;
+    --text: #e6e8ee;
+    --muted: #8a90a3;
+    --accent: #5b8cff;
+    --good: #3ecf8e;
+    --warn: #e8b339;
+    --bad: #e85d5d;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  .layout {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 0;
+    min-height: calc(100vh - 57px);
+  }
+  .sidebar {
+    border-right: 1px solid var(--border);
+    padding: 16px;
+    overflow-y: auto;
+    max-height: calc(100vh - 57px);
+  }
+  .main {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+    max-height: calc(100vh - 57px);
+  }
+  section.card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 16px;
+  }
+  section.card h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: 0 0 10px 0;
+  }
+  label {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin: 8px 0 4px;
+  }
+  input, select {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 7px 8px;
+    font-size: 13px;
+  }
+  input:focus, select:focus { outline: 1px solid var(--accent); }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 10px;
+  }
+  button:hover { filter: brightness(1.08); }
+  button.secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  button.danger { background: var(--bad); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status-line {
+    font-size: 12px;
+    margin-top: 8px;
+    color: var(--muted);
+    word-break: break-word;
+  }
+  .status-line.ok { color: var(--good); }
+  .status-line.err { color: var(--bad); }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .pill.idle { background: #2a2f3d; color: var(--muted); }
+  .pill.requesting { background: #2a3550; color: var(--accent); }
+  .pill.playing { background: #163f30; color: var(--good); }
+  .pill.waiting { background: #4a3a14; color: var(--warn); }
+  .pill.error { background: #4a1f1f; color: var(--bad); }
+  .toolbar { display: flex; gap: 8px; align-items: center; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+  }
+  .screen-tile {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .screen-tile .tile-head {
+    padding: 8px 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .screen-tile .tile-head .label { font-weight: 600; font-size: 13px; }
+  .screen-tile .video-wrap {
+    background: black;
+    aspect-ratio: 16/9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  .screen-tile.portrait .video-wrap { aspect-ratio: 9/16; }
+  .screen-tile video { width: 100%; height: 100%; object-fit: contain; background: black; }
+  .screen-tile .placeholder { color: var(--muted); font-size: 12px; text-align: center; padding: 10px; }
+  .screen-tile .tile-foot {
+    padding: 8px 10px;
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .screen-tile .tile-foot .campaign { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .list-item {
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    background: var(--panel-2);
+  }
+  .list-item .title { font-weight: 600; margin-bottom: 2px; }
+  .list-item .meta { color: var(--muted); }
+  #log {
+    background: #0e1016;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    height: 220px;
+    overflow-y: auto;
+    color: #b7bdd0;
+  }
+  #log div { padding: 1px 0; border-bottom: 1px dashed #1c202c; }
+  #log .tag-req { color: #6fa8ff; }
+  #log .tag-ok { color: var(--good); }
+  #log .tag-warn { color: var(--warn); }
+  #log .tag-err { color: var(--bad); }
+  .empty-hint {
+    color: var(--muted);
+    font-size: 13px;
+    padding: 20px;
+    text-align: center;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+  }
+  a { color: var(--accent); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ad-server live simulator</h1>
+  <span class="sub">register virtual screens, create campaigns, watch fulfillment happen in real time</span>
+</header>
+
+<div class="layout">
+  <div class="sidebar">
+
+    <section class="card">
+      <h2>Connection</h2>
+      <label for="apiBase">API base URL</label>
+      <input id="apiBase" value="https://ad-server-loadtest.vercel.app" />
+      <label for="tenantKey">Tenant API key</label>
+      <input id="tenantKey" type="password" placeholder="tenant_..." />
+      <button id="connectBtn">Connect</button>
+      <div id="connectStatus" class="status-line"></div>
+      <details style="margin-top:10px;">
+        <summary>Where do I get a tenant API key?</summary>
+        <div class="status-line" style="margin-top:6px;">
+          Use the dev "Tenant 0" test tenant's key (see
+          <code>simulator/.output/tenant0-credentials.json</code> in the repo), or grab any
+          tenant's key from <code>GET /v1/tenant/api-key</code> / the tenant dashboard's API
+          settings page. This tool talks directly to whatever API base URL and tenant key you
+          give it &mdash; nothing is hardcoded server-side.
+        </div>
+      </details>
+    </section>
+
+    <section class="card" id="campaignCard" style="display:none;">
+      <h2>New campaign</h2>
+      <label for="cName">Name</label>
+      <input id="cName" placeholder="Summer promo" />
+      <label for="cMedia">Media URL (video, mp4)</label>
+      <input id="cMedia" placeholder="https://.../video.mp4" value="https://www.w3schools.com/html/mov_bbb.mp4" />
+      <div class="row">
+        <div>
+          <label for="cObligationType">Obligation</label>
+          <select id="cObligationType">
+            <option value="impression_count">impression count</option>
+            <option value="share_of_voice">share of voice</option>
+          </select>
+        </div>
+        <div>
+          <label for="cObligationTarget">Target</label>
+          <input id="cObligationTarget" type="number" value="1000" />
+        </div>
+      </div>
+      <label for="cPriority">Priority weight</label>
+      <input id="cPriority" type="number" step="0.1" value="1" />
+      <button id="createCampaignBtn">Create &amp; activate campaign</button>
+      <div id="campaignStatus" class="status-line"></div>
+      <div id="campaignList" style="margin-top:10px;"></div>
+    </section>
+
+    <section class="card" id="screenCard" style="display:none;">
+      <h2>Register virtual screen</h2>
+      <label for="sLabel">Label</label>
+      <input id="sLabel" placeholder="Lobby Screen 1" />
+      <div class="row">
+        <div>
+          <label for="sAspect">Aspect ratio</label>
+          <select id="sAspect">
+            <option>16:9</option>
+            <option>9:16</option>
+            <option>4:3</option>
+          </select>
+        </div>
+        <div>
+          <label for="sOrientation">Orientation</label>
+          <select id="sOrientation">
+            <option value="landscape">landscape</option>
+            <option value="portrait">portrait</option>
+          </select>
+        </div>
+      </div>
+      <label for="sResolution">Resolution</label>
+      <input id="sResolution" value="1920x1080" />
+      <div class="row">
+        <div>
+          <label for="sState">State (optional)</label>
+          <input id="sState" maxlength="2" placeholder="NY" />
+        </div>
+        <div>
+          <label for="sZip">Zip (optional)</label>
+          <input id="sZip" placeholder="10001" />
+        </div>
+      </div>
+      <button id="registerScreenBtn">Register screen</button>
+      <div id="screenStatus" class="status-line"></div>
+    </section>
+
+  </div>
+
+  <div class="main">
+    <section class="card">
+      <div class="toolbar">
+        <h2 style="margin:0;">Live screens</h2>
+        <span style="flex:1;"></span>
+        <button id="startAllBtn" class="secondary" disabled>Start all</button>
+        <button id="stopAllBtn" class="secondary" disabled>Stop all</button>
+      </div>
+      <div id="screenGrid" class="grid" style="margin-top:12px;">
+        <div class="empty-hint" id="gridEmptyHint">Connect, then register a screen to see it here.</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Activity log</h2>
+      <div id="log"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+(function () {
+  const state = {
+    apiBase: '',
+    tenantKey: '',
+    screens: new Map(), // screen_id -> { screen, deviceKey, running, videoEl, statusEl, campaignEl, timer }
+    campaigns: [],
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const logEl = $('log');
+
+  function log(tag, msg) {
+    const line = document.createElement('div');
+    const time = new Date().toLocaleTimeString();
+    line.innerHTML = `<span class="tag-${tag}">[${time}] ${escapeHtml(msg)}</span>`;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+    while (logEl.children.length > 300) logEl.removeChild(logEl.firstChild);
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function setStatus(el, msg, cls) {
+    el.textContent = msg;
+    el.className = 'status-line' + (cls ? ' ' + cls : '');
+  }
+
+  async function api(path, opts, key) {
+    const url = state.apiBase.replace(/\/$/, '') + path;
+    const headers = Object.assign({ 'Content-Type': 'application/json' }, opts && opts.headers);
+    if (key) headers['Authorization'] = 'Bearer ' + key;
+    const res = await fetch(url, Object.assign({}, opts, { headers }));
+    let body = null;
+    try { body = await res.json(); } catch (e) { /* no body */ }
+    return { ok: res.ok, status: res.status, body };
+  }
+
+  // ---------- Connection ----------
+  $('connectBtn').addEventListener('click', async () => {
+    const apiBase = $('apiBase').value.trim();
+    const tenantKey = $('tenantKey').value.trim();
+    if (!apiBase || !tenantKey) {
+      setStatus($('connectStatus'), 'API base URL and tenant key are both required.', 'err');
+      return;
+    }
+    setStatus($('connectStatus'), 'Connecting...');
+    state.apiBase = apiBase;
+    state.tenantKey = tenantKey;
+
+    const res = await api('/v1/tenant/usage', { method: 'GET' }, tenantKey);
+    if (!res.ok) {
+      setStatus($('connectStatus'), `Failed (${res.status}): ${res.body?.error ?? 'invalid key or URL'}`, 'err');
+      log('err', `connect failed: ${res.status} ${JSON.stringify(res.body)}`);
+      return;
+    }
+    setStatus($('connectStatus'), `Connected. Quota used: ${res.body.used_count ?? '?'} / ${res.body.quota ?? '?'}`, 'ok');
+    log('ok', `connected to ${apiBase}`);
+    $('campaignCard').style.display = 'block';
+    $('screenCard').style.display = 'block';
+    $('startAllBtn').disabled = false;
+    $('stopAllBtn').disabled = false;
+    loadCampaigns();
+  });
+
+  // ---------- Campaigns ----------
+  async function loadCampaigns() {
+    const res = await api('/v1/campaigns', { method: 'GET' }, state.tenantKey);
+    if (!res.ok) return;
+    state.campaigns = res.body.campaigns ?? [];
+    renderCampaignList();
+  }
+
+  function renderCampaignList() {
+    const el = $('campaignList');
+    if (state.campaigns.length === 0) {
+      el.innerHTML = '<div class="status-line">No campaigns yet.</div>';
+      return;
+    }
+    el.innerHTML = state.campaigns.map((c) => `
+      <div class="list-item">
+        <div class="title">${escapeHtml(c.name)} <span class="pill idle">${c.status}</span></div>
+        <div class="meta">${c.obligation_type} target ${c.obligation_target} &middot; ${escapeHtml(c.creative_media_path).slice(0, 40)}${c.creative_media_path.length > 40 ? '...' : ''}</div>
+      </div>
+    `).join('');
+  }
+
+  $('createCampaignBtn').addEventListener('click', async () => {
+    const name = $('cName').value.trim();
+    const media = $('cMedia').value.trim();
+    const obligationType = $('cObligationType').value;
+    const obligationTarget = Number($('cObligationTarget').value);
+    const priority = Number($('cPriority').value);
+
+    if (!name || !media) {
+      setStatus($('campaignStatus'), 'Name and media URL are required.', 'err');
+      return;
+    }
+
+    const now = new Date();
+    const flightStart = new Date(now.getTime() - 60 * 1000).toISOString();
+    const flightEnd = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
+
+    setStatus($('campaignStatus'), 'Creating...');
+    const res = await api('/v1/campaigns', {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        creative_media_path: media,
+        obligation_type: obligationType,
+        obligation_target: obligationTarget,
+        priority_weight: priority,
+        flight_start: flightStart,
+        flight_end: flightEnd,
+        status: 'active',
+        targeting: { geo: { type: 'all' } },
+      }),
+    }, state.tenantKey);
+
+    if (!res.ok) {
+      setStatus($('campaignStatus'), `Failed (${res.status}): ${res.body?.error ?? 'unknown error'}`, 'err');
+      log('err', `create campaign failed: ${JSON.stringify(res.body)}`);
+      return;
+    }
+    setStatus($('campaignStatus'), `Created "${res.body.campaign.name}" (active).`, 'ok');
+    log('ok', `campaign created: ${res.body.campaign.name} (${res.body.campaign.id})`);
+    $('cName').value = '';
+    loadCampaigns();
+  });
+
+  // ---------- Screens ----------
+  $('registerScreenBtn').addEventListener('click', async () => {
+    const label = $('sLabel').value.trim();
+    const aspect = $('sAspect').value;
+    const orientation = $('sOrientation').value;
+    const resolution = $('sResolution').value.trim();
+    const stateVal = $('sState').value.trim();
+    const zip = $('sZip').value.trim();
+
+    if (!label || !resolution) {
+      setStatus($('screenStatus'), 'Label and resolution are required.', 'err');
+      return;
+    }
+
+    setStatus($('screenStatus'), 'Registering...');
+    const res = await api('/v1/screens', {
+      method: 'POST',
+      body: JSON.stringify({
+        label,
+        aspect_ratio: aspect,
+        resolution,
+        orientation,
+        state: stateVal || null,
+        zip: zip || null,
+        is_simulated: true,
+      }),
+    }, state.tenantKey);
+
+    if (!res.ok) {
+      setStatus($('screenStatus'), `Failed (${res.status}): ${res.body?.error ?? 'unknown error'}`, 'err');
+      log('err', `register screen failed: ${JSON.stringify(res.body)}`);
+      return;
+    }
+
+    setStatus($('screenStatus'), `Registered "${res.body.screen.label}".`, 'ok');
+    log('ok', `screen registered: ${res.body.screen.label} (${res.body.screen.id})`);
+    addScreenTile(res.body.screen, res.body.device_api_key);
+    $('sLabel').value = '';
+  });
+
+  function addScreenTile(screen, deviceKey) {
+    $('gridEmptyHint')?.remove();
+
+    const tile = document.createElement('div');
+    tile.className = 'screen-tile' + (screen.orientation === 'portrait' ? ' portrait' : '');
+    tile.innerHTML = `
+      <div class="tile-head">
+        <span class="label">${escapeHtml(screen.label)}</span>
+        <span class="pill idle" data-role="status-pill">idle</span>
+      </div>
+      <div class="video-wrap">
+        <video data-role="video" muted playsinline></video>
+        <div class="placeholder" data-role="placeholder">waiting to start...</div>
+      </div>
+      <div class="tile-foot">
+        <span class="campaign" data-role="campaign-label">no content yet</span>
+        <button class="secondary" data-role="toggle" style="margin:0; padding:4px 8px; font-size:11px;">start</button>
+      </div>
+    `;
+    $('screenGrid').appendChild(tile);
+
+    const entry = {
+      screen,
+      deviceKey,
+      running: false,
+      videoEl: tile.querySelector('[data-role="video"]'),
+      placeholderEl: tile.querySelector('[data-role="placeholder"]'),
+      statusPillEl: tile.querySelector('[data-role="status-pill"]'),
+      campaignLabelEl: tile.querySelector('[data-role="campaign-label"]'),
+      toggleBtn: tile.querySelector('[data-role="toggle"]'),
+      retryTimer: null,
+    };
+    state.screens.set(screen.id, entry);
+
+    entry.toggleBtn.addEventListener('click', () => {
+      if (entry.running) stopScreen(screen.id);
+      else startScreen(screen.id);
+    });
+  }
+
+  function setPill(entry, text, cls) {
+    entry.statusPillEl.textContent = text;
+    entry.statusPillEl.className = 'pill ' + cls;
+  }
+
+  function startScreen(screenId) {
+    const entry = state.screens.get(screenId);
+    if (!entry || entry.running) return;
+    entry.running = true;
+    entry.toggleBtn.textContent = 'stop';
+    requestNextFulfillment(screenId);
+  }
+
+  function stopScreen(screenId) {
+    const entry = state.screens.get(screenId);
+    if (!entry) return;
+    entry.running = false;
+    entry.toggleBtn.textContent = 'start';
+    if (entry.retryTimer) { clearTimeout(entry.retryTimer); entry.retryTimer = null; }
+    entry.videoEl.pause();
+    setPill(entry, 'idle', 'idle');
+  }
+
+  async function requestNextFulfillment(screenId) {
+    const entry = state.screens.get(screenId);
+    if (!entry || !entry.running) return;
+
+    setPill(entry, 'requesting', 'requesting');
+    log('req', `${entry.screen.label} -> POST /v1/fulfillments`);
+
+    const res = await api('/v1/fulfillments', { method: 'POST', body: '{}' }, entry.deviceKey);
+
+    if (!entry.running) return; // stopped while awaiting
+
+    if (res.status === 429) {
+      setPill(entry, 'quota exceeded', 'error');
+      log('err', `${entry.screen.label}: quota exceeded, stopping`);
+      stopScreen(screenId);
+      return;
+    }
+
+    if (!res.ok) {
+      setPill(entry, 'error', 'error');
+      log('err', `${entry.screen.label}: ${res.status} ${JSON.stringify(res.body)}`);
+      entry.retryTimer = setTimeout(() => requestNextFulfillment(screenId), 4000);
+      return;
+    }
+
+    if (!res.body.fulfillment_id) {
+      setPill(entry, 'waiting', 'waiting');
+      entry.placeholderEl.style.display = 'block';
+      entry.placeholderEl.textContent = 'no eligible campaigns right now...';
+      log('warn', `${entry.screen.label}: no eligible campaigns`);
+      entry.retryTimer = setTimeout(() => requestNextFulfillment(screenId), 4000);
+      return;
+    }
+
+    const { fulfillment_id, campaign_id, media_ref } = res.body;
+    const campaign = state.campaigns.find((c) => c.id === campaign_id);
+    entry.campaignLabelEl.textContent = campaign ? campaign.name : campaign_id;
+    log('ok', `${entry.screen.label}: fulfilled -> ${campaign ? campaign.name : campaign_id}`);
+
+    setPill(entry, 'playing', 'playing');
+    entry.placeholderEl.style.display = 'none';
+    entry.videoEl.src = media_ref;
+
+    const onEnded = async () => {
+      entry.videoEl.removeEventListener('ended', onEnded);
+      entry.videoEl.removeEventListener('error', onError);
+      if (!entry.running) return;
+      const playedMs = Math.round((entry.videoEl.duration || 0) * 1000);
+      log('req', `${entry.screen.label} -> POST /v1/fulfillments/${fulfillment_id}/report (played)`);
+      await api(`/v1/fulfillments/${fulfillment_id}/report`, {
+        method: 'POST',
+        body: JSON.stringify({ outcome: 'played', played_duration_ms: playedMs || undefined }),
+      }, entry.deviceKey);
+      requestNextFulfillment(screenId);
+    };
+
+    const onError = async () => {
+      entry.videoEl.removeEventListener('ended', onEnded);
+      entry.videoEl.removeEventListener('error', onError);
+      if (!entry.running) return;
+      log('err', `${entry.screen.label}: video failed to load (${media_ref})`);
+      await api(`/v1/fulfillments/${fulfillment_id}/report`, {
+        method: 'POST',
+        body: JSON.stringify({ outcome: 'failed' }),
+      }, entry.deviceKey);
+      entry.retryTimer = setTimeout(() => requestNextFulfillment(screenId), 3000);
+    };
+
+    entry.videoEl.addEventListener('ended', onEnded);
+    entry.videoEl.addEventListener('error', onError);
+    entry.videoEl.play().catch((e) => log('warn', `${entry.screen.label}: autoplay blocked, click the tile's video to start playback (${e.message})`));
+  }
+
+  $('startAllBtn').addEventListener('click', () => {
+    for (const id of state.screens.keys()) startScreen(id);
+  });
+  $('stopAllBtn').addEventListener('click', () => {
+    for (const id of state.screens.keys()) stopScreen(id);
+  });
+})();
+</script>
+
+</body>
+</html>
