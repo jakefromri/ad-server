@@ -217,7 +217,7 @@
     <section class="card">
       <h2>Connection</h2>
       <label for="apiBase">API base URL</label>
-      <input id="apiBase" value="https://ad-server-loadtest.vercel.app" />
+      <input id="apiBase" />
       <label for="tenantKey">Tenant API key</label>
       <input id="tenantKey" type="password" placeholder="tenant_..." />
       <button id="connectBtn">Connect</button>
@@ -225,11 +225,14 @@
       <details style="margin-top:10px;">
         <summary>Where do I get a tenant API key?</summary>
         <div class="status-line" style="margin-top:6px;">
-          Use the dev "Tenant 0" test tenant's key (see
-          <code>simulator/.output/tenant0-credentials.json</code> in the repo), or grab any
-          tenant's key from <code>GET /v1/tenant/api-key</code> / the tenant dashboard's API
-          settings page. This tool talks directly to whatever API base URL and tenant key you
-          give it &mdash; nothing is hardcoded server-side.
+          The API base URL defaults to wherever this page itself is hosted, so dev and prod each
+          talk to their own environment automatically &mdash; no manual switching. Grab a key from
+          <code>GET /v1/tenant/api-key</code> or the tenant dashboard's API settings page. On dev,
+          the seeded "Tenant 0" test tenant's key is in
+          <code>simulator/.output/tenant0-credentials.json</code>. On prod, use a dedicated test
+          tenant &mdash; never a real customer tenant's key. This tool talks directly to whatever
+          API base URL and tenant key you give it &mdash; nothing is hardcoded server-side, and
+          the field is editable if you want to point it somewhere else.
         </div>
       </details>
     </section>
@@ -330,6 +333,15 @@
 
   const $ = (id) => document.getElementById(id);
   const logEl = $('log');
+
+  // Default the API base to wherever this page itself is hosted, so the dev
+  // preview deploy talks to dev and the prod deploy talks to prod
+  // automatically. Falls back to the dev preview URL when opened as a local
+  // file (window.location.origin is "null"/"file://" there, not a usable API
+  // host).
+  $('apiBase').value = window.location.origin.startsWith('http')
+    ? window.location.origin
+    : 'https://ad-server-loadtest.vercel.app';
 
   function log(tag, msg) {
     const line = document.createElement('div');
