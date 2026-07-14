@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/auth';
 const NAV_ITEMS = [
   { to: '/t/campaigns', label: 'Campaigns' },
   { to: '/t/screens', label: 'Screens' },
+  { to: '/t/play-log', label: 'Play log' },
   { to: '/t/usage', label: 'Usage' },
   { to: '/t/settings', label: 'Settings' },
 ];

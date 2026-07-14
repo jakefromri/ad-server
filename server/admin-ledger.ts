@@ -13,6 +13,7 @@ import { Hono } from 'hono';
 import { ErrorCode } from '../types';
 import { supabaseAdmin } from './supabase';
 import { humanAuthMiddleware, requireRole } from './human-auth';
+import { encodeCursor, decodeCursor } from './cursor';
 
 const router = new Hono();
 router.use('*', humanAuthMiddleware, requireRole('superadmin'));
@@ -20,25 +21,6 @@ router.use('*', humanAuthMiddleware, requireRole('superadmin'));
 const VALID_STATUSES = ['reserved', 'confirmed', 'expired', 'failed'];
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
-
-// btoa/atob (Web-standard, Edge-safe), not Buffer — api/index.ts runs on
-// Vercel Edge runtime, which has no Node.js globals (same constraint as
-// hash.ts's crypto.subtle-over-Node-crypto rule). requested_at/id are both
-// plain ASCII, so no UTF-8 multibyte concern here.
-function encodeCursor(requestedAt: string, id: string): string {
-  return btoa(`${requestedAt}|${id}`);
-}
-
-function decodeCursor(cursor: string): { requestedAt: string; id: string } | null {
-  try {
-    const decoded = atob(cursor);
-    const [requestedAt, id] = decoded.split('|');
-    if (!requestedAt || !id) return null;
-    return { requestedAt, id };
-  } catch {
-    return null;
-  }
-}
 
 router.get('/', async (c) => {
   const tenantId = c.req.query('tenant_id');
@@ -77,9 +59,7 @@ router.get('/', async (c) => {
     // Keep rows strictly after the cursor position in the same (requested_at
     // desc, id desc) order: earlier requested_at, or equal requested_at with
     // a smaller id.
-    query = query.or(
-      `requested_at.lt.${decoded.requestedAt},and(requested_at.eq.${decoded.requestedAt},id.lt.${decoded.id})`
-    );
+    query = query.or(`requested_at.lt.${decoded.primary},and(requested_at.eq.${decoded.primary},id.lt.${decoded.id})`);
   }
 
   const { data, error } = await query;

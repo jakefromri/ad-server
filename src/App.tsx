@@ -7,6 +7,7 @@ import InviteAccept from '@/pages/InviteAccept';
 import CampaignsList from '@/pages/tenant/CampaignsList';
 import CampaignForm from '@/pages/tenant/CampaignForm';
 import ScreensList from '@/pages/tenant/ScreensList';
+import PlayLog from '@/pages/tenant/PlayLog';
 import Usage from '@/pages/tenant/Usage';
 import Settings from '@/pages/tenant/Settings';
 import TenantsList from '@/pages/admin/TenantsList';
@@ -29,6 +30,7 @@ export default function App() {
           <Route path="campaigns/new" element={<CampaignForm />} />
           <Route path="campaigns/:id/edit" element={<CampaignForm />} />
           <Route path="screens" element={<ScreensList />} />
+          <Route path="play-log" element={<PlayLog />} />
           <Route path="usage" element={<Usage />} />
           <Route path="settings" element={<Settings />} />
         </Route>

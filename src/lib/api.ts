@@ -53,3 +53,23 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
 
   return payload as T;
 }
+
+// For endpoints that return a file (e.g. the play-log CSV export) rather
+// than JSON — apiFetch always parses/expects JSON, so this is a separate,
+// minimal fetch that reuses the same auth pattern.
+export async function apiFetchBlob(path: string): Promise<Blob> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new ApiError(res.status, (body?.error as string | undefined) ?? res.statusText, body?.code, body ?? undefined);
+  }
+
+  return res.blob();
+}
