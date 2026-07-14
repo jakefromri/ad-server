@@ -64,4 +64,26 @@ export interface UsageByScreenResponse {
   screens: { screen_id: string; label: string; count: number }[];
 }
 
+// GET /v1/tenant/play-log — same fulfillments ledger as LedgerResponse, but
+// tenant-scoped and joined with campaign name / screen label server-side.
+export interface PlayLogEntry {
+  id: string;
+  requested_at: string;
+  status: Fulfillment['status'];
+  report_outcome: Fulfillment['report_outcome'];
+  played_duration_ms: number | null;
+  media_ref: string;
+  campaign_id: string;
+  campaign_name: string;
+  screen_id: string;
+  screen_label: string;
+}
+
+export interface PlayLogResponse {
+  entries: PlayLogEntry[];
+  next_cursor: string | null;
+}
+
+export type PlayLogExportWindow = 'day' | 'week' | 'month';
+
 export type { Campaign, Screen, Tenant, Fulfillment };
