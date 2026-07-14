@@ -34,6 +34,9 @@
       "name": "Tenant — API key & usage"
     },
     {
+      "name": "Tenant — Play log"
+    },
+    {
       "name": "Device — Fulfillment"
     },
     {
@@ -1140,6 +1143,57 @@
                   "window_hours": 24,
                   "screens": []
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenant/play-log": {
+      "get": {
+        "tags": [
+          "Tenant — Play log"
+        ],
+        "summary": "Cursor-paginated log of media plays (fulfillments) with campaign/screen info",
+        "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "security": [
+          {
+            "tenantAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": {
+                  "entries": [],
+                  "next_cursor": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenant/play-log/export": {
+      "get": {
+        "tags": [
+          "Tenant — Play log"
+        ],
+        "summary": "CSV download of the play log for the past day/week/month",
+        "description": "**Auth:** tenant_admin JWT or tenant API key",
+        "security": [
+          {
+            "tenantAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "example": "text/csv attachment"
               }
             }
           }
